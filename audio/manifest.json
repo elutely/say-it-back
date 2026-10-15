@@ -1,0 +1,32 @@
+{
+ "af_heart": {
+  "Could you say that again, please?": "af_heart/01.mp3",
+  "I'm looking forward to seeing you next week.": "af_heart/02.mp3",
+  "It depends on how much time we have.": "af_heart/03.mp3",
+  "Let me check my schedule and get back to you.": "af_heart/04.mp3",
+  "I didn't expect it to be this crowded.": "af_heart/05.mp3",
+  "What do you usually do on weekends?": "af_heart/06.mp3",
+  "That makes sense, but I see it a little differently.": "af_heart/07.mp3",
+  "I've been meaning to try that restaurant for a while.": "af_heart/08.mp3"
+ },
+ "am_michael": {
+  "Could you say that again, please?": "am_michael/01.mp3",
+  "I'm looking forward to seeing you next week.": "am_michael/02.mp3",
+  "It depends on how much time we have.": "am_michael/03.mp3",
+  "Let me check my schedule and get back to you.": "am_michael/04.mp3",
+  "I didn't expect it to be this crowded.": "am_michael/05.mp3",
+  "What do you usually do on weekends?": "am_michael/06.mp3",
+  "That makes sense, but I see it a little differently.": "am_michael/07.mp3",
+  "I've been meaning to try that restaurant for a while.": "am_michael/08.mp3"
+ },
+ "bf_emma": {
+  "Could you say that again, please?": "bf_emma/01.mp3",
+  "I'm looking forward to seeing you next week.": "bf_emma/02.mp3",
+  "It depends on how much time we have.": "bf_emma/03.mp3",
+  "Let me check my schedule and get back to you.": "bf_emma/04.mp3",
+  "I didn't expect it to be this crowded.": "bf_emma/05.mp3",
+  "What do you usually do on weekends?": "bf_emma/06.mp3",
+  "That makes sense, but I see it a little differently.": "bf_emma/07.mp3",
+  "I've been meaning to try that restaurant for a while.": "bf_emma/08.mp3"
+ }
+}

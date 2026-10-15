@@ -6,3 +6,4 @@ https://elutely.github.io/say-it-back/
 
 - PC の Chrome 向けです（Safari も対応、Firefox は非対応）
 - 英文リストは「英文リストと設定」から差し替えられます。リストは使っているブラウザにだけ保存されます
+- お手本の「自然な声」は、オープンソースの読み上げモデル Kokoro（Apache-2.0）で作った音声です（`audio/`）

@@ -280,9 +280,23 @@ let silenceSec = parseFloat(store.get("silence", "2")) || 2;
 const GIVE_UP_SEC = 12;
 let ttsOn = store.get("tts", "1") === "1";
 let rate = parseFloat(store.get("rate", "0.9")) || 0.9;
-let voiceName = store.get("voice", "");
+// Voice ids: "k:<name>" = natural voice (Kokoro, pre-made audio files), "d:<name>" = a voice built into the device.
+let voiceName = store.get("voice", "k:af_heart");
+if (!/^[kd]:/.test(voiceName)) voiceName = voiceName ? "d:" + voiceName : "k:af_heart";
 const synth = window.speechSynthesis;
 let currentUtterance = null, noStartTimer = null, ttsUnlocked = false;
+const NATURAL = [
+  ["af_heart", "Heart（アメリカ・女性）", "en-US"],
+  ["am_michael", "Michael（アメリカ・男性）", "en-US"],
+  ["bf_emma", "Emma（イギリス・女性）", "en-GB"]
+];
+// Pre-made audio for the sample sentences. A missing manifest (e.g. the file opened on its own) just means none.
+let manifest = {};
+fetch("audio/manifest.json").then(r => r.ok ? r.json() : {}).then(m => { manifest = m || {}; }).catch(() => {});
+// One audio element for the whole session: phones only let an element play from a timer after it was started in a tap.
+const player = new Audio();
+const SILENT_MP3 = "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//OEwAAAAAAAAAAAAEluZm8AAAAPAAAABwAAA2AAVVVVVVVVVVVVVVVVVVVxcXFxcXFxcXFxcXFxcY6Ojo6Ojo6Ojo6Ojo6Oqqqqqqqqqqqqqqqqqqqqx8fHx8fHx8fHx8fHx8fj4+Pj4+Pj4+Pj4+Pj4///////////////////AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQEIAAAAAAAAANgmVBi7QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//NExAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMu//NExFMAAANIAAAAADEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMu//NExKYAAANIAAAAADEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMu//NExKwAAANIAAAAADEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMu//NExKwAAANIAAAAADEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NExKwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NExKwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV";
+let sayGen = 0, sayTimer = null;
 
 function parseList(text) {
   return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
@@ -423,8 +437,8 @@ function next() {
 
 // Each sentence: play the model (if on), then listen. Speech heard while the model plays is ignored.
 function begin() {
-  $("replayBtn").disabled = !(ttsOn && synth);
-  if (ttsOn && synth) playModel(); else listen();
+  $("replayBtn").disabled = !ttsOn;
+  if (ttsOn) playModel(); else listen();
 }
 // A fresh recognizer per sentence: the mic is off while the model plays, so its voice is never picked up.
 function listen() {
@@ -434,9 +448,88 @@ function listen() {
   startRec();
   armGiveUp();
 }
-function pickVoice() {
-  const en = synth.getVoices().filter(v => /^en[-_]/i.test(v.lang));
-  return en.find(v => v.name === voiceName) || en.find(v => /en[-_]US/i.test(v.lang)) || en[0] || null;
+function deviceVoice() {
+  const en = synth ? synth.getVoices().filter(v => /^en[-_]/i.test(v.lang)) : [];
+  const want = voiceName.startsWith("d:") ? voiceName.slice(2) : "";
+  const accent = (NATURAL.find(n => "k:" + n[0] === voiceName) || [, , "en-US"])[2].slice(3);
+  return en.find(v => v.name === want) || en.find(v => new RegExp("en[-_]" + accent, "i").test(v.lang)) || en[0] || null;
+}
+function prebuiltUrl(text) {
+  if (!voiceName.startsWith("k:")) return null;
+  const file = manifest[voiceName.slice(2)]?.[text];
+  return file ? "audio/" + file : null;
+}
+function stopSay() {
+  sayGen++;
+  clearTimeout(sayTimer); clearTimeout(noStartTimer);
+  try { player.pause(); } catch {}
+  try { if (synth && (synth.speaking || synth.pending)) synth.cancel(); } catch {}
+}
+// Reads text aloud with the chosen voice: pre-made natural audio if there is one, otherwise the device voice.
+// done() runs once when playback ends or fails; onStart() when sound begins.
+function say(text, done, onStart) {
+  stopSay();
+  const my = sayGen;
+  let finished = false, fellBack = false;
+  const finish = () => {
+    if (finished || my !== sayGen) return;
+    finished = true;
+    clearTimeout(sayTimer); clearTimeout(noStartTimer);
+    done && done();
+  };
+  const fallback = () => {
+    if (fellBack || finished || my !== sayGen) return;
+    fellBack = true;
+    clearTimeout(sayTimer);
+    sayDevice(text, my, finish, onStart);
+  };
+  const url = prebuiltUrl(text);
+  if (!url) return sayDevice(text, my, finish, onStart);
+  player.onended = finish;
+  player.onerror = fallback;
+  player.onplaying = () => {
+    if (my !== sayGen || fellBack) return;
+    clearTimeout(sayTimer);
+    onStart && onStart();
+    sayTimer = setTimeout(finish, ((player.duration || 6) / rate + 2) * 1000);
+  };
+  player.defaultPlaybackRate = rate;
+  player.src = url;
+  player.playbackRate = rate;
+  player.play().catch(fallback);
+  sayTimer = setTimeout(() => { if (player.paused) fallback(); }, 4000);
+}
+function sayDevice(text, my, finish, onStart) {
+  if (!synth) return finish();
+  const u = new SpeechSynthesisUtterance(text);
+  currentUtterance = u; // keep a reference: Chrome can garbage-collect it and never fire onend
+  const v = deviceVoice();
+  if (v) u.voice = v;
+  u.lang = v ? v.lang : "en-US";
+  u.rate = rate;
+  u.onend = finish;
+  u.onerror = e => {
+    if (my === sayGen && e.error !== "interrupted" && e.error !== "canceled") showError(`お手本を読み上げられませんでした（${e.error}）。`);
+    finish();
+  };
+  u.onstart = () => {
+    if (my !== sayGen) return;
+    clearTimeout(noStartTimer);
+    onStart && onStart();
+    // Some browsers never fire onend; fall back to an estimate of the playback time.
+    sayTimer = setTimeout(finish, (text.split(/\s+/).length * 0.55 / rate + 3) * 1000);
+  };
+  noStartTimer = setTimeout(() => {
+    if (my !== sayGen) return;
+    showError("お手本の読み上げが始まりませんでした。端末の音量と、マナーモードを確認してください。");
+    finish();
+  }, 5000);
+  // Android Chrome drops an utterance queued right after cancel(), so leave a short gap.
+  setTimeout(() => {
+    if (my !== sayGen) return;
+    try { synth.resume(); } catch {}
+    synth.speak(u);
+  }, 250);
 }
 function playModel() {
   if (!running || judged) return;
@@ -445,52 +538,18 @@ function playModel() {
   stopRec();
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
   setStatus("お手本を再生中…");
-  // Android Chrome drops an utterance queued right after cancel(), so cancel only when needed
-  // and leave a short gap (which also lets the mic close before playback).
-  if (synth.speaking || synth.pending) synth.cancel();
-  const u = new SpeechSynthesisUtterance(items[order[pos]].en);
-  currentUtterance = u; // keep a reference: Chrome can garbage-collect it and never fire onend
-  const v = pickVoice();
-  if (v) u.voice = v;
-  u.lang = v ? v.lang : "en-US";
-  u.rate = rate;
-  let done = false;
-  const after = () => {
-    if (done || my !== modelGen) return;
-    done = true;
+  // The mic is already closed; a short gap afterwards keeps the tail of the voice out of it.
+  say(items[order[pos]].en, () => {
     setTimeout(() => { if (my === modelGen && running && !judged) listen(); }, 150);
-  };
-  u.onend = after;
-  u.onerror = e => {
-    if (my === modelGen && e.error !== "interrupted" && e.error !== "canceled") showError(`お手本を読み上げられませんでした（${e.error}）。`);
-    after();
-  };
-  u.onstart = () => {
-    if (my !== modelGen) return;
-    clearTimeout(noStartTimer);
-    // Some browsers never fire onend; fall back to an estimate of the playback time.
-    setTimeout(after, (words.length * 0.55 / rate + 3) * 1000);
-  };
-  clearTimeout(noStartTimer);
-  noStartTimer = setTimeout(() => {
-    if (my !== modelGen || done) return;
-    showError("お手本の読み上げが始まりませんでした。端末の音量と、マナーモードを確認してください。");
-    after();
-  }, 5000);
-  setTimeout(() => {
-    if (my !== modelGen || !running || judged) return;
-    try { synth.resume(); } catch {}
-    synth.speak(u);
-  }, 250);
+  });
 }
 function endModel() {
   modelGen++;
-  clearTimeout(noStartTimer);
   speaking = false;
-  try { synth?.cancel(); } catch {}
+  stopSay();
 }
 function replay() {
-  if (!running || judged || !synth) return;
+  if (!running || judged) return;
   playModel();
 }
 function skip() {
@@ -504,8 +563,10 @@ async function start() {
   if (!Rec) { showError("このブラウザは音声認識に対応していません。Chrome（PC / Android）か Safari で開いてください。"); return; }
   // Phones allow speech only after it is first started inside a tap, so play a silent utterance now,
   // before any await ends the tap's permission.
-  if (synth && !ttsUnlocked) {
-    try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); ttsUnlocked = true; } catch {}
+  if (!ttsUnlocked) {
+    ttsUnlocked = true;
+    try { if (synth) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); } } catch {}
+    try { player.src = SILENT_MP3; player.play().catch(() => {}); } catch {}
   }
   try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
@@ -573,36 +634,31 @@ $("tts").onchange = e => { ttsOn = e.target.checked; store.set("tts", ttsOn ? "1
 $("rate").value = rate; $("rateVal").textContent = rate;
 $("rate").oninput = e => { rate = parseFloat(e.target.value); $("rateVal").textContent = rate; store.set("rate", rate); };
 function fillVoices() {
-  if (!synth) return;
-  const en = synth.getVoices().filter(v => /^en[-_]/i.test(v.lang));
-  const cur = pickVoice();
-  if (!en.length) {
-    const o = document.createElement("option"); o.value = ""; o.textContent = "標準の英語の声";
-    $("voice").replaceChildren(o); return;
-  }
-  $("voice").replaceChildren(...en.map(v => {
-    const o = document.createElement("option");
-    o.value = v.name; o.textContent = `${v.name} (${v.lang})`; o.selected = cur && v.name === cur.name;
-    return o;
-  }));
+  const group = (label, opts) => {
+    const g = document.createElement("optgroup"); g.label = label;
+    opts.forEach(([value, text]) => {
+      const o = document.createElement("option"); o.value = value; o.textContent = text; o.selected = value === voiceName;
+      g.append(o);
+    });
+    return g;
+  };
+  const en = synth ? synth.getVoices().filter(v => /^en[-_]/i.test(v.lang)) : [];
+  const groups = [group("自然な声", NATURAL.map(([id, label]) => ["k:" + id, label]))];
+  if (en.length) groups.push(group("端末の声", en.map(v => ["d:" + v.name, `${v.name} (${v.lang})`])));
+  $("voice").replaceChildren(...groups);
+  // A saved device voice that is not on this device: show the default natural voice instead.
+  if ($("voice").value !== voiceName && !(voiceName.startsWith("d:") && !en.length)) $("voice").value = voiceName;
 }
 $("voice").onchange = e => { voiceName = e.target.value; store.set("voice", voiceName); preview(); };
 // Plays a sample with the chosen voice (only while not practicing, so it never overlaps the model).
 function preview() {
-  if (!synth || running) return;
-  if (synth.speaking || synth.pending) synth.cancel();
-  const u = new SpeechSynthesisUtterance(items[order[pos]]?.en || "Hello! Let's practice speaking English.");
-  const v = pickVoice();
-  if (v) u.voice = v;
-  u.lang = v ? v.lang : "en-US";
-  u.rate = rate;
-  currentUtterance = u;
-  setTimeout(() => synth.speak(u), 100);
+  if (running) return;
+  say(items[order[pos]]?.en || "Hello! Let's practice speaking English.");
 }
 $("previewBtn").onclick = preview;
-function syncVoiceBar() { $("voiceBar").hidden = !(synth && ttsOn); }
-if (synth) { fillVoices(); synth.addEventListener?.("voiceschanged", fillVoices); }
-else { $("tts").checked = ttsOn = false; $("tts").disabled = true; }
+function syncVoiceBar() { $("voiceBar").hidden = !ttsOn; }
+fillVoices();
+synth?.addEventListener?.("voiceschanged", fillVoices);
 syncVoiceBar();
 $("retryBtn").onclick = () => {
   const missed = results.filter(r => !r.ok).map(r => r.idx);
