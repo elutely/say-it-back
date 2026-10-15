@@ -4,5 +4,5 @@
 
 https://elutely.github.io/say-it-back/
 
-- PC の Chrome で動作確認しています（Safari も対応、Firefox は非対応）
+- PC の Chrome 向けです（Safari も対応、Firefox は非対応）
 - 英文リストは「英文リストと設定」から差し替えられます。リストは使っているブラウザにだけ保存されます
