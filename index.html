@@ -271,6 +271,7 @@ let ttsOn = store.get("tts", "1") === "1";
 let rate = parseFloat(store.get("rate", "0.9")) || 0.9;
 let voiceName = store.get("voice", "");
 const synth = window.speechSynthesis;
+let currentUtterance = null, noStartTimer = null, ttsUnlocked = false;
 
 function parseList(text) {
   return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
@@ -432,8 +433,11 @@ function playModel() {
   stopRec();
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
   setStatus("お手本を再生中…");
-  synth.cancel();
+  // Android Chrome drops an utterance queued right after cancel(), so cancel only when needed
+  // and leave a short gap (which also lets the mic close before playback).
+  if (synth.speaking || synth.pending) synth.cancel();
   const u = new SpeechSynthesisUtterance(items[order[pos]].en);
+  currentUtterance = u; // keep a reference: Chrome can garbage-collect it and never fire onend
   const v = pickVoice();
   if (v) u.voice = v;
   u.lang = v ? v.lang : "en-US";
@@ -444,13 +448,32 @@ function playModel() {
     done = true;
     setTimeout(() => { if (my === modelGen && running && !judged) listen(); }, 150);
   };
-  u.onend = after; u.onerror = after;
-  // Some browsers never fire onend; fall back to an estimate of the playback time.
-  setTimeout(after, (words.length * 0.55 / rate + 3) * 1000);
-  synth.speak(u);
+  u.onend = after;
+  u.onerror = e => {
+    if (my === modelGen && e.error !== "interrupted" && e.error !== "canceled") showError(`お手本を読み上げられませんでした（${e.error}）。`);
+    after();
+  };
+  u.onstart = () => {
+    if (my !== modelGen) return;
+    clearTimeout(noStartTimer);
+    // Some browsers never fire onend; fall back to an estimate of the playback time.
+    setTimeout(after, (words.length * 0.55 / rate + 3) * 1000);
+  };
+  clearTimeout(noStartTimer);
+  noStartTimer = setTimeout(() => {
+    if (my !== modelGen || done) return;
+    showError("お手本の読み上げが始まりませんでした。端末の音量と、マナーモードを確認してください。");
+    after();
+  }, 5000);
+  setTimeout(() => {
+    if (my !== modelGen || !running || judged) return;
+    try { synth.resume(); } catch {}
+    synth.speak(u);
+  }, 250);
 }
 function endModel() {
   modelGen++;
+  clearTimeout(noStartTimer);
   speaking = false;
   try { synth?.cancel(); } catch {}
 }
@@ -467,6 +490,11 @@ function skip() {
 async function start() {
   $("error").hidden = true;
   if (!Rec) { showError("このブラウザは音声認識に対応していません。Chrome（PC / Android）か Safari で開いてください。"); return; }
+  // Phones allow speech only after it is first started inside a tap, so play a silent utterance now,
+  // before any await ends the tap's permission.
+  if (synth && !ttsUnlocked) {
+    try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); ttsUnlocked = true; } catch {}
+  }
   try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   if (pos >= order.length || !$("results").hidden) loadList();
