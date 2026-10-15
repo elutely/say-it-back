@@ -75,7 +75,7 @@ button {
   border: 1px solid var(--line); background: var(--surface); color: var(--ink);
 }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); flex: 1; min-width: 160px; }
-button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
 button:disabled { opacity: .5; cursor: default; }
 
 details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
@@ -89,6 +89,7 @@ textarea {
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .row label { font-size: 14px; }
 input[type=range] { accent-color: var(--accent); }
+select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); max-width: 100%; min-width: 0; }
 
 .results { display: grid; gap: 8px; }
 .results h2 { font-size: 16px; margin: 0 0 4px; }
@@ -122,6 +123,7 @@ input[type=range] { accent-color: var(--accent); }
 
   <div class="controls">
     <button class="primary" id="startBtn" type="button">スタート</button>
+    <button id="replayBtn" type="button" disabled>もう一度聞く</button>
     <button id="skipBtn" type="button" disabled>スキップ</button>
     <button id="retryBtn" type="button" hidden>言えなかった文だけもう一度</button>
   </div>
@@ -134,6 +136,17 @@ input[type=range] { accent-color: var(--accent); }
       <div class="row">
         <button id="saveBtn" type="button">保存して最初から</button>
         <button id="resetBtn" type="button">サンプルに戻す</button>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="tts"> お手本を読み上げてからリピート</label>
+      </div>
+      <div class="row">
+        <label for="rate">読み上げの速さ: <span id="rateVal"></span>倍</label>
+        <input type="range" id="rate" min="0.6" max="1.2" step="0.1">
+      </div>
+      <div class="row">
+        <label for="voice">声</label>
+        <select id="voice"></select>
       </div>
       <div class="row">
         <label for="silence">言い終わりの判定（無音）: <span id="silenceVal"></span>秒</label>
@@ -229,11 +242,15 @@ const store = {
 const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 let items = [], order = [], pos = 0, results = [];
-let hits = [], words = [], running = false, judged = false;
+let hits = [], words = [], running = false, judged = false, speaking = false, modelGen = 0;
 let rec = null, gen = 0, baseIndex = 0, lastLen = 0;
 let silenceTimer = null, giveUpTimer = null, audio = null, wakeLock = null;
 let silenceSec = parseFloat(store.get("silence", "2")) || 2;
 const GIVE_UP_SEC = 12;
+let ttsOn = store.get("tts", "1") === "1";
+let rate = parseFloat(store.get("rate", "0.9")) || 0.9;
+let voiceName = store.get("voice", "");
+const synth = window.speechSynthesis;
 
 function parseList(text) {
   return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
@@ -296,7 +313,7 @@ function startRec() {
   r.onresult = e => {
     if (my !== gen) return;
     lastLen = e.results.length;
-    if (judged) return;
+    if (judged || speaking) return;
     // One recognizer runs for the whole session (restarting it re-asks for the mic),
     // so results from earlier sentences are skipped by index.
     let finalText = "", interim = [];
@@ -332,7 +349,6 @@ function startRec() {
   };
   rec = r;
   try { r.start(); } catch { setTimeout(startRec, 300); }
-  armGiveUp();
 }
 function stopRec() { gen++; if (rec) { try { rec.abort(); } catch {} rec = null; } }
 function armGiveUp() {
@@ -344,6 +360,8 @@ function judge() {
   if (judged || !running) return;
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
   judged = true;
+  endModel();
+  $("replayBtn").disabled = true;
   const ok = hits.every(Boolean);
   paint(true);
   results.push({ idx: order[pos], ok, hits: hits.slice() });
@@ -357,8 +375,57 @@ function next() {
   if (pos >= order.length) return finish();
   baseIndex = lastLen;
   show();
-  setStatus("聞き取り中…", true);
-  if (rec) armGiveUp(); else startRec();
+  if (!rec) startRec();
+  begin();
+}
+
+// Each sentence: play the model (if on), then listen. Speech heard while the model plays is ignored.
+function begin() {
+  $("replayBtn").disabled = !(ttsOn && synth);
+  if (ttsOn && synth) playModel(); else listen();
+}
+function listen() {
+  speaking = false;
+  baseIndex = lastLen;
+  setStatus(ttsOn ? "どうぞ、リピートしてください。" : "聞き取り中…", true);
+  armGiveUp();
+}
+function pickVoice() {
+  const en = synth.getVoices().filter(v => /^en[-_]/i.test(v.lang));
+  return en.find(v => v.name === voiceName) || en.find(v => /en[-_]US/i.test(v.lang)) || en[0] || null;
+}
+function playModel() {
+  if (!running || judged) return;
+  const my = ++modelGen;
+  speaking = true;
+  clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
+  setStatus("お手本を再生中…");
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(items[order[pos]].en);
+  const v = pickVoice();
+  if (v) u.voice = v;
+  u.lang = v ? v.lang : "en-US";
+  u.rate = rate;
+  let done = false;
+  const after = () => {
+    if (done || my !== modelGen) return;
+    done = true;
+    // A short gap so the tail of the model voice is not taken as the learner's speech.
+    setTimeout(() => { if (my === modelGen && running && !judged) listen(); }, 400);
+  };
+  u.onend = after; u.onerror = after;
+  // Some browsers never fire onend; fall back to an estimate of the playback time.
+  setTimeout(after, (words.length * 0.55 / rate + 3) * 1000);
+  synth.speak(u);
+}
+function endModel() {
+  modelGen++;
+  speaking = false;
+  try { synth?.cancel(); } catch {}
+}
+function replay() {
+  if (!running || judged || !synth) return;
+  playModel();
 }
 function skip() {
   if (!running || judged) return;
@@ -375,16 +442,17 @@ async function start() {
   running = true;
   $("startBtn").textContent = "一時停止"; $("skipBtn").disabled = false;
   $("settingsBox").open = false;
-  setStatus("聞き取り中…", true);
   show();
   startRec();
+  begin();
 }
 function stop() {
   running = false;
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
+  endModel();
   stopRec();
   try { wakeLock?.release(); } catch {}
-  $("startBtn").textContent = "再開"; $("skipBtn").disabled = true;
+  $("startBtn").textContent = "再開"; $("skipBtn").disabled = true; $("replayBtn").disabled = true;
   setStatus("一時停止中。再開すると今の文からやり直します。");
 }
 function finish() {
@@ -414,6 +482,24 @@ function showError(msg) { $("error").textContent = msg; $("error").hidden = fals
 
 $("startBtn").onclick = () => running ? stop() : start();
 $("skipBtn").onclick = skip;
+$("replayBtn").onclick = replay;
+$("tts").checked = ttsOn;
+$("tts").onchange = e => { ttsOn = e.target.checked; store.set("tts", ttsOn ? "1" : "0"); };
+$("rate").value = rate; $("rateVal").textContent = rate;
+$("rate").oninput = e => { rate = parseFloat(e.target.value); $("rateVal").textContent = rate; store.set("rate", rate); };
+function fillVoices() {
+  if (!synth) return;
+  const en = synth.getVoices().filter(v => /^en[-_]/i.test(v.lang));
+  const cur = pickVoice();
+  $("voice").replaceChildren(...en.map(v => {
+    const o = document.createElement("option");
+    o.value = v.name; o.textContent = `${v.name} (${v.lang})`; o.selected = cur && v.name === cur.name;
+    return o;
+  }));
+}
+$("voice").onchange = e => { voiceName = e.target.value; store.set("voice", voiceName); };
+if (synth) { fillVoices(); synth.addEventListener?.("voiceschanged", fillVoices); }
+else { $("tts").checked = ttsOn = false; $("tts").disabled = true; }
 $("retryBtn").onclick = () => {
   const missed = results.filter(r => !r.ok).map(r => r.idx);
   loadList(missed);
