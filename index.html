@@ -106,6 +106,11 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
 
 .results { display: grid; gap: 8px; }
 .results h2 { font-size: 16px; margin: 0 0 4px; }
+.score { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; margin-bottom: 8px; }
+.score-num { font-family: var(--font-say); font-size: 56px; font-weight: 600; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
+.score-num small { font-size: 20px; font-weight: 500; margin-left: 4px; color: var(--ink); }
+.score-detail { display: grid; gap: 4px; font-size: 14px; color: var(--pending); font-variant-numeric: tabular-nums; }
+.score-detail strong { color: var(--ink); font-weight: 600; }
 .res { display: flex; gap: 10px; align-items: baseline; font-family: var(--font-say); font-size: 16px; line-height: 1.5; }
 .res b { font-family: var(--font-ui); font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 99px; flex: none; }
 .res b.ok { background: var(--accent-soft); color: var(--accent); }
@@ -292,6 +297,7 @@ function show() {
   $("count").textContent = `${Math.min(pos + 1, order.length)} / ${order.length}`;
   $("bar").style.width = (order.length ? pos / order.length * 100 : 0) + "%";
   $("card").classList.remove("ok");
+  $("card").hidden = false;
   $("heard").textContent = "";
   if (!item) { $("sentence").textContent = ""; $("ja").textContent = ""; return; }
   $("ja").textContent = item.ja;
@@ -518,11 +524,26 @@ function finish() {
   $("startBtn").textContent = "最初からもう一度";
   $("bar").style.width = "100%";
   const okCount = results.filter(r => r.ok).length;
-  setStatus(`終了。${results.length} 文中 ${okCount} 文を言えました。`);
+  const wordTotal = results.reduce((n, r) => n + r.hits.length, 0);
+  const wordHit = results.reduce((n, r) => n + r.hits.filter(Boolean).length, 0);
+  // Score = share of words said, out of 100 (skipped sentences count as 0).
+  const score = wordTotal ? Math.round(wordHit / wordTotal * 100) : 0;
+  setStatus(`終了。${score}点でした。`);
   $("sentence").textContent = ""; $("ja").textContent = ""; $("heard").textContent = "";
+  $("card").hidden = true;
   const box = $("results");
-  const h = document.createElement("h2"); h.textContent = "結果";
-  box.replaceChildren(h, ...results.map(r => {
+  const card = document.createElement("div"); card.className = "score";
+  const num = document.createElement("div"); num.className = "score-num";
+  num.append(String(score)); const unit = document.createElement("small"); unit.textContent = "点"; num.append(unit);
+  const detail = document.createElement("div"); detail.className = "score-detail";
+  [["文", okCount, results.length, "文を全部言えた"], ["単語", wordHit, wordTotal, "語を言えた"]].forEach(([, a, b, label]) => {
+    const line = document.createElement("span");
+    const st = document.createElement("strong"); st.textContent = `${a} / ${b}`;
+    line.append(st, " " + label); detail.append(line);
+  });
+  card.append(num, detail);
+  const h = document.createElement("h2"); h.textContent = "文ごとの結果";
+  box.replaceChildren(card, h, ...results.map(r => {
     const row = document.createElement("div"); row.className = "res";
     const b = document.createElement("b"); b.className = r.ok ? "ok" : "ng"; b.textContent = r.ok ? "OK" : "もう一度";
     const span = document.createElement("span");
