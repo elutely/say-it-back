@@ -155,7 +155,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <div class="row">
         <label><input type="checkbox" id="shuffle"> 順番をシャッフル</label>
       </div>
-      <p class="hint">PC の Chrome 向けに作っています。Safari（iPhone）も音声認識に対応していますが、途中で聞き取りが止まることがあります。Firefox は非対応。音声認識はブラウザの機能を使うため、オンラインで使ってください。ファイルを直接開くと、スタートや再開のたびにマイクの許可を聞かれます。URL（https か localhost）で開くと許可が記憶されます。</p>
+      <p class="hint">PC の Chrome 向けに作っています。Safari（iPhone）も音声認識に対応していますが、途中で聞き取りが止まることがあります。Firefox は非対応。音声認識はブラウザの機能を使うため、オンラインで使ってください。ファイルを直接開くと、文ごとにマイクの許可を聞かれます。URL（https か localhost）で開くと許可が記憶されます。</p>
     </div>
   </details>
 </div>
@@ -243,7 +243,7 @@ const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 let items = [], order = [], pos = 0, results = [];
 let hits = [], words = [], running = false, judged = false, speaking = false, modelGen = 0;
-let rec = null, gen = 0, baseIndex = 0, lastLen = 0;
+let rec = null, gen = 0, restarts = 0, completing = false;
 let silenceTimer = null, giveUpTimer = null, audio = null, wakeLock = null;
 let silenceSec = parseFloat(store.get("silence", "2")) || 2;
 const GIVE_UP_SEC = 12;
@@ -277,6 +277,7 @@ function show() {
   words = item.en.split(/\s+/);
   hits = words.map(() => false);
   judged = false;
+  completing = false;
   $("sentence").replaceChildren(...words.map(w => {
     const s = document.createElement("span"); s.className = "w"; s.textContent = w; return s;
   }));
@@ -306,18 +307,15 @@ function ping() {
 }
 
 function startRec() {
+  stopRec();
   const my = ++gen;
-  baseIndex = 0; lastLen = 0;
   const r = new Rec();
   r.lang = "en-US"; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
   r.onresult = e => {
-    if (my !== gen) return;
-    lastLen = e.results.length;
-    if (judged || speaking) return;
-    // One recognizer runs for the whole session (restarting it re-asks for the mic),
-    // so results from earlier sentences are skipped by index.
+    if (my !== gen || judged || speaking) return;
+    restarts = 0;
     let finalText = "", interim = [];
-    for (let i = baseIndex; i < e.results.length; i++) {
+    for (let i = 0; i < e.results.length; i++) {
       const res = e.results[i];
       if (res.isFinal) finalText += " " + res[0].transcript;
       else interim = [...res].map(a => a.transcript);
@@ -329,7 +327,11 @@ function startRec() {
     $("heard").textContent = heard;
     paint(false);
     clearTimeout(giveUpTimer);
-    if (hits.every(Boolean)) { clearTimeout(silenceTimer); silenceTimer = setTimeout(judge, 250); return; }
+    if (hits.every(Boolean)) {
+      // Once every word is said, judge right away; later results (noise) must not postpone it.
+      if (!completing) { completing = true; clearTimeout(silenceTimer); silenceTimer = setTimeout(judge, 250); }
+      return;
+    }
     clearTimeout(silenceTimer);
     silenceTimer = setTimeout(judge, silenceSec * 1000);
   };
@@ -340,17 +342,25 @@ function startRec() {
       showError("マイクが使えません。アドレスバーの鍵アイコンからマイクを「許可」にして、もう一度スタートしてください。");
     } else if (e.error === "network") {
       showError("音声認識サーバーに接続できません。インターネット接続を確認してください。");
+    } else if (e.error !== "no-speech" && e.error !== "aborted") {
+      showError(`音声認識が止まりました（${e.error}）。自動で再開します。`);
     }
   };
+  r.onstart = () => {
+    if (my !== gen || !running || judged || speaking) return;
+    $("error").hidden = true;
+    setStatus(ttsOn ? "どうぞ、リピートしてください。" : "聞き取り中…", true);
+  };
+  // Chrome ends a session on its own after silence; start a fresh recognizer for the same sentence.
   r.onend = () => {
-    if (my !== gen || !running) return;
-    baseIndex = 0; lastLen = 0;
-    try { r.start(); } catch { setTimeout(startRec, 300); }
+    if (my !== gen || !running || judged || speaking) return;
+    if (++restarts > 8) { stop(); showError("音声認識が何度も止まりました。「再開」を押してください。"); return; }
+    setTimeout(() => { if (my === gen && running && !judged && !speaking) startRec(); }, 250);
   };
   rec = r;
-  try { r.start(); } catch { setTimeout(startRec, 300); }
+  try { r.start(); } catch { setTimeout(() => { if (my === gen && running) startRec(); }, 300); }
 }
-function stopRec() { gen++; if (rec) { try { rec.abort(); } catch {} rec = null; } }
+function stopRec() { gen++; if (rec) { const r = rec; rec = null; try { r.abort(); } catch {} } }
 function armGiveUp() {
   clearTimeout(giveUpTimer);
   giveUpTimer = setTimeout(() => { if (running && !judged) judge(); }, GIVE_UP_SEC * 1000);
@@ -361,6 +371,7 @@ function judge() {
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
   judged = true;
   endModel();
+  stopRec();
   $("replayBtn").disabled = true;
   const ok = hits.every(Boolean);
   paint(true);
@@ -373,9 +384,7 @@ function next() {
   if (!running) return;
   pos++;
   if (pos >= order.length) return finish();
-  baseIndex = lastLen;
   show();
-  if (!rec) startRec();
   begin();
 }
 
@@ -384,10 +393,12 @@ function begin() {
   $("replayBtn").disabled = !(ttsOn && synth);
   if (ttsOn && synth) playModel(); else listen();
 }
+// A fresh recognizer per sentence: the mic is off while the model plays, so its voice is never picked up.
 function listen() {
   speaking = false;
-  baseIndex = lastLen;
-  setStatus(ttsOn ? "どうぞ、リピートしてください。" : "聞き取り中…", true);
+  restarts = 0;
+  setStatus("マイクを準備中…");
+  startRec();
   armGiveUp();
 }
 function pickVoice() {
@@ -398,6 +409,7 @@ function playModel() {
   if (!running || judged) return;
   const my = ++modelGen;
   speaking = true;
+  stopRec();
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
   setStatus("お手本を再生中…");
   synth.cancel();
@@ -410,8 +422,7 @@ function playModel() {
   const after = () => {
     if (done || my !== modelGen) return;
     done = true;
-    // A short gap so the tail of the model voice is not taken as the learner's speech.
-    setTimeout(() => { if (my === modelGen && running && !judged) listen(); }, 400);
+    setTimeout(() => { if (my === modelGen && running && !judged) listen(); }, 150);
   };
   u.onend = after; u.onerror = after;
   // Some browsers never fire onend; fall back to an estimate of the playback time.
@@ -443,7 +454,6 @@ async function start() {
   $("startBtn").textContent = "一時停止"; $("skipBtn").disabled = false;
   $("settingsBox").open = false;
   show();
-  startRec();
   begin();
 }
 function stop() {
