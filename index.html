@@ -585,7 +585,7 @@ function say(text, done, onStart) {
     if (my !== sayGen) return;
     if (!url) return sayDevice(text, my, finish, onStart);
     playUrl(url, my, finish, fallback, onStart);
-  });
+  }).catch(() => { if (my === sayGen) sayDevice(text, my, finish, onStart); });
 }
 function playUrl(url, my, finish, fallback, onStart) {
   player.onended = finish;
