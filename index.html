@@ -83,6 +83,10 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 @media (prefers-reduced-motion: reduce) { .listening .dot { animation: none; } .w, .bar > i { transition: none; } }
 
 .controls { display: flex; gap: 10px; flex-wrap: wrap; }
+.voice-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
+.voice-bar label { color: var(--pending); }
+.voice-bar select { flex: 1; min-width: 0; }
+.voice-bar button { padding: 8px 14px; font-size: 14px; }
 button {
   font: inherit; font-weight: 500; border-radius: 10px; padding: 12px 18px; cursor: pointer;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink);
@@ -146,6 +150,12 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <section class="results" id="results" hidden></section>
   </main>
 
+  <div class="voice-bar" id="voiceBar">
+    <label for="voice">お手本の声</label>
+    <select id="voice"></select>
+    <button id="previewBtn" type="button">試聴</button>
+  </div>
+
   <div class="controls">
     <button class="primary" id="startBtn" type="button">スタート</button>
     <button id="replayBtn" type="button" disabled>もう一度聞く</button>
@@ -168,10 +178,6 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <div class="row">
         <label for="rate">読み上げの速さ: <span id="rateVal"></span>倍</label>
         <input type="range" id="rate" min="0.6" max="1.2" step="0.1">
-      </div>
-      <div class="row">
-        <label for="voice">声</label>
-        <select id="voice"></select>
       </div>
       <div class="row">
         <label for="silence">言い終わりの判定（無音）: <span id="silenceVal"></span>秒</label>
@@ -505,7 +511,7 @@ async function start() {
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   if (pos >= order.length || !$("results").hidden) loadList();
   running = true;
-  $("startBtn").textContent = "一時停止"; $("skipBtn").disabled = false;
+  $("startBtn").textContent = "一時停止"; $("skipBtn").disabled = false; $("previewBtn").disabled = true;
   $("settingsBox").open = false;
   show();
   begin();
@@ -516,7 +522,7 @@ function stop() {
   endModel();
   stopRec();
   try { wakeLock?.release(); } catch {}
-  $("startBtn").textContent = "再開"; $("skipBtn").disabled = true; $("replayBtn").disabled = true;
+  $("startBtn").textContent = "再開"; $("skipBtn").disabled = true; $("replayBtn").disabled = true; $("previewBtn").disabled = false;
   setStatus("一時停止中。再開すると今の文からやり直します。");
 }
 function finish() {
@@ -563,22 +569,41 @@ $("startBtn").onclick = () => running ? stop() : start();
 $("skipBtn").onclick = skip;
 $("replayBtn").onclick = replay;
 $("tts").checked = ttsOn;
-$("tts").onchange = e => { ttsOn = e.target.checked; store.set("tts", ttsOn ? "1" : "0"); };
+$("tts").onchange = e => { ttsOn = e.target.checked; store.set("tts", ttsOn ? "1" : "0"); syncVoiceBar(); };
 $("rate").value = rate; $("rateVal").textContent = rate;
 $("rate").oninput = e => { rate = parseFloat(e.target.value); $("rateVal").textContent = rate; store.set("rate", rate); };
 function fillVoices() {
   if (!synth) return;
   const en = synth.getVoices().filter(v => /^en[-_]/i.test(v.lang));
   const cur = pickVoice();
+  if (!en.length) {
+    const o = document.createElement("option"); o.value = ""; o.textContent = "標準の英語の声";
+    $("voice").replaceChildren(o); return;
+  }
   $("voice").replaceChildren(...en.map(v => {
     const o = document.createElement("option");
     o.value = v.name; o.textContent = `${v.name} (${v.lang})`; o.selected = cur && v.name === cur.name;
     return o;
   }));
 }
-$("voice").onchange = e => { voiceName = e.target.value; store.set("voice", voiceName); };
+$("voice").onchange = e => { voiceName = e.target.value; store.set("voice", voiceName); preview(); };
+// Plays a sample with the chosen voice (only while not practicing, so it never overlaps the model).
+function preview() {
+  if (!synth || running) return;
+  if (synth.speaking || synth.pending) synth.cancel();
+  const u = new SpeechSynthesisUtterance(items[order[pos]]?.en || "Hello! Let's practice speaking English.");
+  const v = pickVoice();
+  if (v) u.voice = v;
+  u.lang = v ? v.lang : "en-US";
+  u.rate = rate;
+  currentUtterance = u;
+  setTimeout(() => synth.speak(u), 100);
+}
+$("previewBtn").onclick = preview;
+function syncVoiceBar() { $("voiceBar").hidden = !(synth && ttsOn); }
 if (synth) { fillVoices(); synth.addEventListener?.("voiceschanged", fillVoices); }
 else { $("tts").checked = ttsOn = false; $("tts").disabled = true; }
+syncVoiceBar();
 $("retryBtn").onclick = () => {
   const missed = results.filter(r => !r.ok).map(r => r.idx);
   loadList(missed);
