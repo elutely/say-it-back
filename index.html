@@ -99,9 +99,23 @@ button:disabled { opacity: .5; cursor: default; }
 details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
 summary { cursor: pointer; font-weight: 500; }
 .settings { display: grid; gap: 12px; margin-top: 12px; }
-textarea {
-  width: 100%; min-height: 180px; font-family: var(--font-say); font-size: 15px; line-height: 1.6;
-  border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--bg); color: var(--ink); resize: vertical;
+.rows { display: grid; gap: 8px; }
+.rows-head, .srow { display: grid; grid-template-columns: 1.6em minmax(0, 3fr) minmax(0, 2fr) 2.4em; gap: 8px; align-items: start; }
+.srow .num { padding-top: 10px; }
+.rows-head { font-size: 12px; color: var(--pending); letter-spacing: 0.04em; }
+.srow .num { font-size: 12px; color: var(--pending); text-align: right; font-variant-numeric: tabular-nums; }
+.srow textarea {
+  display: block; width: 100%; min-width: 0; font-size: 15px; line-height: 1.45; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink);
+  resize: none; overflow: hidden;
+}
+.srow .en { font-family: var(--font-say); }
+.srow .ja { font-family: var(--font-ui); }
+.srow .del { padding: 8px 0; font-size: 16px; line-height: 1; color: var(--pending); }
+@media (max-width: 560px) {
+  .rows-head { display: none; }
+  .srow { grid-template-columns: 1.6em minmax(0, 1fr) 2.4em; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .srow .ja { grid-column: 2; grid-row: 2; }
 }
 .hint { font-size: 13px; color: var(--pending); margin: 0; line-height: 1.6; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -168,9 +182,12 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
   <details id="settingsBox">
     <summary>英文リストと設定</summary>
     <div class="settings">
-      <p class="hint">1行に1文。日本語訳を付けるときは「英文 | 日本語」と書きます。リストはこのブラウザに保存されます。</p>
-      <textarea id="list" spellcheck="false"></textarea>
+      <p class="hint">英文と和訳を別々に入れます。和訳はなくても使えます。何行かまとめて貼り付けると、1行ずつ別の文に分かれます。リストはこのブラウザに保存されます。</p>
+      <div class="rows" id="rows">
+        <div class="rows-head"><span></span><span>英文</span><span>和訳</span><span></span></div>
+      </div>
       <div class="row">
+        <button id="addRowBtn" type="button">＋ 文を追加</button>
         <button id="saveBtn" type="button">保存して最初から</button>
         <button id="resetBtn" type="button">サンプルに戻す</button>
       </div>
@@ -401,8 +418,70 @@ function parseList(text) {
     return { en, ja };
   }).filter(x => x.en);
 }
+// ---- Sentence list editor: one row per sentence, English and Japanese in separate fields ----
+function rowEls() { return [...$("rows").querySelectorAll(".srow")]; }
+function listText() {
+  return rowEls().map(r => {
+    const en = r.querySelector(".en").value.replace(/[|\n]/g, " ").trim();
+    const ja = r.querySelector(".ja").value.replace(/[|\n]/g, " ").trim();
+    return en ? (ja ? `${en} | ${ja}` : en) : "";
+  }).filter(Boolean).join("\n");
+}
+// Grow a text box to show its whole sentence.
+function fit(el) {
+  if (!el.offsetParent) return; // hidden (settings closed): measured again when shown
+  el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px";
+}
+const fitAll = () => $("rows").querySelectorAll("textarea").forEach(fit);
+function renumber() { rowEls().forEach((r, i) => { r.querySelector(".num").textContent = i + 1; }); }
+function addRow(en = "", ja = "", after = null) {
+  const row = document.createElement("div"); row.className = "srow";
+  const num = document.createElement("span"); num.className = "num";
+  const enI = document.createElement("textarea"); enI.className = "en"; enI.rows = 1; enI.value = en;
+  enI.placeholder = "English sentence"; enI.lang = "en"; enI.spellcheck = false; enI.setAttribute("aria-label", "英文");
+  const jaI = document.createElement("textarea"); jaI.className = "ja"; jaI.rows = 1; jaI.value = ja;
+  jaI.placeholder = "和訳（なくても可）"; jaI.setAttribute("aria-label", "和訳");
+  const del = document.createElement("button"); del.type = "button"; del.className = "del"; del.textContent = "×";
+  del.setAttribute("aria-label", "この文を削除");
+  del.onclick = () => { row.remove(); if (!rowEls().length) addRow(); renumber(); };
+  // Pasting several lines splits them into rows, filling the same column downward.
+  [enI, jaI].forEach(input => input.addEventListener("paste", e => {
+    const lines = (e.clipboardData?.getData("text") || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return;
+    e.preventDefault();
+    const col = input.className;
+    let r = row;
+    lines.forEach((line, i) => {
+      if (i > 0) r = r.nextElementSibling?.classList.contains("srow") ? r.nextElementSibling : addRow("", "", r);
+      r.querySelector("." + col).value = line;
+      fit(r.querySelector("." + col));
+    });
+    renumber();
+  }));
+  [enI, jaI].forEach(input => {
+    input.addEventListener("input", () => fit(input));
+    // Enter moves on instead of starting a new line: English -> 和訳 -> next sentence.
+    input.addEventListener("keydown", e => {
+      if (e.key !== "Enter" || e.isComposing || e.shiftKey) return;
+      e.preventDefault();
+      if (input === enI) return jaI.focus();
+      const next = row.nextElementSibling?.classList.contains("srow") ? row.nextElementSibling : addRow("", "", row);
+      next.querySelector(".en").focus();
+    });
+  });
+  row.append(num, enI, jaI, del);
+  if (after) after.after(row); else $("rows").append(row);
+  renumber();
+  requestAnimationFrame(() => { fit(enI); fit(jaI); });
+  return row;
+}
+function renderRows(text) {
+  rowEls().forEach(r => r.remove());
+  const list = parseList(text);
+  (list.length ? list : [{ en: "", ja: "" }]).forEach(x => addRow(x.en, x.ja));
+}
 function loadList(indices) {
-  items = parseList($("list").value);
+  items = parseList(listText());
   order = indices || items.map((_, i) => i);
   if (!indices && $("shuffle").checked) order.sort(() => Math.random() - 0.5);
   pos = 0; results = [];
@@ -785,8 +864,9 @@ $("retryBtn").onclick = () => {
   loadList(missed);
   start();
 };
-$("saveBtn").onclick = () => { store.set("list", $("list").value); if (running) stop(); loadList(); setStatus("保存しました。「スタート」で始めます。"); };
-$("resetBtn").onclick = () => { $("list").value = SAMPLE; store.set("list", SAMPLE); if (running) stop(); loadList(); };
+$("addRowBtn").onclick = () => addRow().querySelector(".en").focus();
+$("saveBtn").onclick = () => { store.set("list", listText()); if (running) stop(); loadList(); setStatus("保存しました。「スタート」で始めます。"); };
+$("resetBtn").onclick = () => { renderRows(SAMPLE); store.set("list", SAMPLE); if (running) stop(); loadList(); };
 $("silence").value = silenceSec; $("silenceVal").textContent = silenceSec;
 $("silence").oninput = e => { silenceSec = parseFloat(e.target.value); $("silenceVal").textContent = silenceSec; store.set("silence", silenceSec); };
 $("shuffle").checked = store.get("shuffle", "0") === "1";
@@ -807,7 +887,9 @@ $("themeBtn").onclick = () => {
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", syncThemeLabel);
 syncThemeLabel();
 
-$("list").value = store.get("list", SAMPLE);
+renderRows(store.get("list", SAMPLE));
+$("settingsBox").addEventListener("toggle", fitAll);
+addEventListener("resize", fitAll);
 loadList();
 if (!Rec) showError("このブラウザは音声認識に対応していません。Chrome（PC / Android）か Safari で開いてください。");
 </script>
