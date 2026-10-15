@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Say It Back</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600&family=IBM+Plex+Sans+JP:wght@400;500;600&display=swap">
+<style>
+/* Layout: one screen — top bar, the sentence card in the middle, controls at the bottom. */
+:root {
+  --bg: #eef3f4;
+  --surface: #ffffff;
+  --ink: #13222c;
+  --pending: #8a9aa3;
+  --muted: #c3ccd1;
+  --accent: #0b7f74;
+  --accent-soft: #d5ece9;
+  --warn: #b5651d;
+  --line: #d9e1e4;
+  --font-say: "Lexend", "Segoe UI", system-ui, sans-serif;
+  --font-ui: "IBM Plex Sans JP", "Hiragino Sans", "Yu Gothic UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f171c; --surface: #17232a; --ink: #e7eef1; --pending: #7d8f98; --muted: #3a4950;
+    --accent: #4cc7b8; --accent-soft: #173b38; --warn: #e3a066; --line: #26343b; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f171c; --surface: #17232a; --ink: #e7eef1; --pending: #7d8f98; --muted: #3a4950;
+  --accent: #4cc7b8; --accent-soft: #173b38; --warn: #e3a066; --line: #26343b; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.app { max-width: 760px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; gap: 20px; padding-block: 20px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+.count { font-variant-numeric: tabular-nums; color: var(--pending); font-size: 14px; }
+.bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+
+.stage { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 18px; min-height: 260px; }
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 36px 28px; min-height: 200px; display: flex; flex-direction: column; justify-content: center; gap: 18px;
+}
+.ja { color: var(--pending); font-size: 14px; margin: 0; min-height: 1.4em; }
+.sentence {
+  font-family: var(--font-say); font-size: clamp(24px, 5vw, 34px); line-height: 1.45; margin: 0;
+  display: flex; flex-wrap: wrap; gap: 0.1em 0.32em; text-wrap: balance;
+}
+.w { color: var(--pending); transition: color .15s; border-bottom: 3px solid transparent; }
+.w.hit { color: var(--ink); border-bottom-color: var(--accent); }
+.w.miss { color: var(--muted); }
+.card.ok { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.heard { font-size: 13px; color: var(--pending); min-height: 1.4em; margin: 0; overflow-wrap: anywhere; }
+.status { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--pending); min-height: 24px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.listening .dot { background: var(--accent); animation: pulse 1.2s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+@media (prefers-reduced-motion: reduce) { .listening .dot { animation: none; } .w, .bar > i { transition: none; } }
+
+.controls { display: flex; gap: 10px; flex-wrap: wrap; }
+button {
+  font: inherit; font-weight: 500; border-radius: 10px; padding: 12px 18px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); flex: 1; min-width: 160px; }
+button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+button:disabled { opacity: .5; cursor: default; }
+
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+summary { cursor: pointer; font-weight: 500; }
+.settings { display: grid; gap: 12px; margin-top: 12px; }
+textarea {
+  width: 100%; min-height: 180px; font-family: var(--font-say); font-size: 15px; line-height: 1.6;
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--bg); color: var(--ink); resize: vertical;
+}
+.hint { font-size: 13px; color: var(--pending); margin: 0; line-height: 1.6; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.row label { font-size: 14px; }
+input[type=range] { accent-color: var(--accent); }
+
+.results { display: grid; gap: 8px; }
+.results h2 { font-size: 16px; margin: 0 0 4px; }
+.res { display: flex; gap: 10px; align-items: baseline; font-family: var(--font-say); font-size: 16px; line-height: 1.5; }
+.res b { font-family: var(--font-ui); font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 99px; flex: none; }
+.res b.ok { background: var(--accent-soft); color: var(--accent); }
+.res b.ng { background: var(--line); color: var(--warn); }
+.res span { min-width: 0; }
+.res .miss { color: var(--muted); text-decoration: line-through; }
+.error { color: var(--warn); font-size: 14px; margin: 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Say It Back</h1>
+    <span class="count" id="count">0 / 0</span>
+  </header>
+  <div class="bar"><i id="bar"></i></div>
+
+  <main class="stage">
+    <section class="card" id="card" aria-live="polite">
+      <p class="ja" id="ja"></p>
+      <p class="sentence" id="sentence"></p>
+      <p class="heard" id="heard"></p>
+    </section>
+    <div class="status" id="status"><span class="dot"></span><span id="statusText">「スタート」を押すと、表示された英文を聞き取り始めます。</span></div>
+    <p class="error" id="error" hidden></p>
+    <section class="results" id="results" hidden></section>
+  </main>
+
+  <div class="controls">
+    <button class="primary" id="startBtn" type="button">スタート</button>
+    <button id="skipBtn" type="button" disabled>スキップ</button>
+    <button id="retryBtn" type="button" hidden>言えなかった文だけもう一度</button>
+  </div>
+
+  <details id="settingsBox">
+    <summary>英文リストと設定</summary>
+    <div class="settings">
+      <p class="hint">1行に1文。日本語訳を付けるときは「英文 | 日本語」と書きます。リストはこのブラウザに保存されます。</p>
+      <textarea id="list" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="saveBtn" type="button">保存して最初から</button>
+        <button id="resetBtn" type="button">サンプルに戻す</button>
+      </div>
+      <div class="row">
+        <label for="silence">言い終わりの判定（無音）: <span id="silenceVal"></span>秒</label>
+        <input type="range" id="silence" min="1" max="4" step="0.5">
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="shuffle"> 順番をシャッフル</label>
+      </div>
+      <p class="hint">動作確認済みの環境は PC の Chrome です。Safari（iPhone）も音声認識に対応していますが、途中で聞き取りが止まることがあります。Firefox は非対応。音声認識はブラウザの機能を使うため、オンラインで使ってください。ファイルを直接開くと、スタートや再開のたびにマイクの許可を聞かれます。URL（https か localhost）で開くと許可が記憶されます。</p>
+    </div>
+  </details>
+</div>
+
+<script>
+/* ===== MATCH-START (pure functions; tested with node) ===== */
+const CONTRACTIONS = {
+  "i'm": "i am", "you're": "you are", "we're": "we are", "they're": "they are", "he's": "he is", "she's": "she is",
+  "it's": "it is", "that's": "that is", "there's": "there is", "what's": "what is", "let's": "let us",
+  "i've": "i have", "you've": "you have", "we've": "we have", "they've": "they have",
+  "i'll": "i will", "you'll": "you will", "we'll": "we will", "they'll": "they will", "it'll": "it will",
+  "i'd": "i would", "you'd": "you would", "we'd": "we would", "they'd": "they would",
+  "don't": "do not", "doesn't": "does not", "didn't": "did not", "can't": "can not", "cannot": "can not",
+  "won't": "will not", "isn't": "is not", "aren't": "are not", "wasn't": "was not", "weren't": "were not",
+  "haven't": "have not", "hasn't": "has not", "hadn't": "had not", "couldn't": "could not",
+  "shouldn't": "should not", "wouldn't": "would not", "gonna": "going to", "wanna": "want to", "gotta": "got to"
+};
+const NUMBERS = ["zero","one","two","three","four","five","six","seven","eight","nine","ten",
+  "eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen","twenty"];
+
+// One word -> list of comparable tokens.
+function tokens(word) {
+  let w = word.toLowerCase().replace(/[’‘`]/g, "'").replace(/[^a-z0-9'%-]/g, "").replace(/^'+|'+$/g, "");
+  if (!w) return [];
+  if (CONTRACTIONS[w]) return CONTRACTIONS[w].split(" ");
+  if (/^\d+$/.test(w) && +w <= 20) return [NUMBERS[+w]];
+  if (w.endsWith("%")) return [w.slice(0, -1), "percent"].filter(Boolean);
+  if (w.includes("-")) return w.split("-").filter(Boolean);
+  if (w.endsWith("'s")) return [w.slice(0, -2)]; // possessive: "Tom's" ~ "Toms"
+  return [w];
+}
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+function same(a, b) {
+  if (a === b) return true;
+  if (a.replace(/'/g, "") === b.replace(/'/g, "")) return true;
+  return a.length >= 5 && b.length >= 5 && editDistance(a, b) <= 1;
+}
+// targetWords: display words. spokenText: what the recognizer heard.
+// Returns one boolean per display word (true = said). Uses in-order alignment (LCS).
+function matchWords(targetWords, spokenText) {
+  const t = [], owner = [];
+  targetWords.forEach((w, i) => tokens(w).forEach(tok => { t.push(tok); owner.push(i); }));
+  const s = spokenText.split(/\s+/).flatMap(tokens);
+  const n = t.length, m = s.length;
+  const L = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      L[i][j] = same(t[i], s[j]) ? L[i+1][j+1] + 1 : Math.max(L[i+1][j], L[i][j+1]);
+  const hitTok = new Array(n).fill(false);
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (same(t[i], s[j]) && L[i][j] === L[i+1][j+1] + 1) { hitTok[i] = true; i++; j++; }
+    else if (L[i+1][j] >= L[i][j+1]) i++;
+    else j++;
+  }
+  const total = new Array(targetWords.length).fill(0), got = new Array(targetWords.length).fill(0);
+  owner.forEach((o, k) => { total[o]++; if (hitTok[k]) got[o]++; });
+  // A word with no comparable tokens (e.g. a lone dash) counts as said.
+  return total.map((c, k) => c === 0 || got[k] === c);
+}
+/* ===== MATCH-END ===== */
+
+const SAMPLE = `Could you say that again, please? | もう一度言っていただけますか？
+I'm looking forward to seeing you next week. | 来週お会いできるのを楽しみにしています。
+It depends on how much time we have. | どれくらい時間があるかによります。
+Let me check my schedule and get back to you. | 予定を確認して折り返し連絡します。
+I didn't expect it to be this crowded. | こんなに混んでいるとは思いませんでした。
+What do you usually do on weekends? | 週末はいつも何をしていますか？
+That makes sense, but I see it a little differently. | なるほど。でも私は少し違う見方をしています。
+I've been meaning to try that restaurant for a while. | あのレストラン、ずっと行ってみたかったんです。`;
+
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("sayitback:" + k); return v === null ? d : v; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("sayitback:" + k, v); } catch {} }
+};
+const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+let items = [], order = [], pos = 0, results = [];
+let hits = [], words = [], running = false, judged = false;
+let rec = null, gen = 0, baseIndex = 0, lastLen = 0;
+let silenceTimer = null, giveUpTimer = null, audio = null, wakeLock = null;
+let silenceSec = parseFloat(store.get("silence", "2")) || 2;
+const GIVE_UP_SEC = 12;
+
+function parseList(text) {
+  return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
+    const [en, ja = ""] = l.split("|").map(x => x.trim());
+    return { en, ja };
+  }).filter(x => x.en);
+}
+function loadList(indices) {
+  items = parseList($("list").value);
+  order = indices || items.map((_, i) => i);
+  if (!indices && $("shuffle").checked) order.sort(() => Math.random() - 0.5);
+  pos = 0; results = [];
+  $("results").hidden = true; $("retryBtn").hidden = true;
+  show();
+}
+function show() {
+  const item = items[order[pos]];
+  $("count").textContent = `${Math.min(pos + 1, order.length)} / ${order.length}`;
+  $("bar").style.width = (order.length ? pos / order.length * 100 : 0) + "%";
+  $("card").classList.remove("ok");
+  $("heard").textContent = "";
+  if (!item) { $("sentence").textContent = ""; $("ja").textContent = ""; return; }
+  $("ja").textContent = item.ja;
+  words = item.en.split(/\s+/);
+  hits = words.map(() => false);
+  judged = false;
+  $("sentence").replaceChildren(...words.map(w => {
+    const s = document.createElement("span"); s.className = "w"; s.textContent = w; return s;
+  }));
+}
+function paint(final) {
+  [...$("sentence").children].forEach((el, i) => {
+    el.classList.toggle("hit", hits[i]);
+    el.classList.toggle("miss", final && !hits[i]);
+  });
+}
+function setStatus(text, listening) {
+  $("statusText").textContent = text;
+  $("status").classList.toggle("listening", !!listening);
+}
+
+function ping() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  [[1318.5, 0], [1760, 0.09]].forEach(([f, d]) => {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = "sine"; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t + d);
+    g.gain.exponentialRampToValueAtTime(0.35, t + d + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.28);
+    o.connect(g).connect(audio.destination); o.start(t + d); o.stop(t + d + 0.3);
+  });
+}
+
+function startRec() {
+  const my = ++gen;
+  baseIndex = 0; lastLen = 0;
+  const r = new Rec();
+  r.lang = "en-US"; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
+  r.onresult = e => {
+    if (my !== gen) return;
+    lastLen = e.results.length;
+    if (judged) return;
+    // One recognizer runs for the whole session (restarting it re-asks for the mic),
+    // so results from earlier sentences are skipped by index.
+    let finalText = "", interim = [];
+    for (let i = baseIndex; i < e.results.length; i++) {
+      const res = e.results[i];
+      if (res.isFinal) finalText += " " + res[0].transcript;
+      else interim = [...res].map(a => a.transcript);
+    }
+    const heard = (finalText + " " + (interim[0] || "")).trim();
+    // Words stay lit once said, so interim flicker never un-lights them.
+    [heard, ...interim.slice(1).map(a => finalText + " " + a)].forEach(txt =>
+      matchWords(words, txt).forEach((h, i) => { if (h) hits[i] = true; }));
+    $("heard").textContent = heard;
+    paint(false);
+    clearTimeout(giveUpTimer);
+    if (hits.every(Boolean)) { clearTimeout(silenceTimer); silenceTimer = setTimeout(judge, 250); return; }
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(judge, silenceSec * 1000);
+  };
+  r.onerror = e => {
+    if (my !== gen) return;
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      stop();
+      showError("マイクが使えません。アドレスバーの鍵アイコンからマイクを「許可」にして、もう一度スタートしてください。");
+    } else if (e.error === "network") {
+      showError("音声認識サーバーに接続できません。インターネット接続を確認してください。");
+    }
+  };
+  r.onend = () => {
+    if (my !== gen || !running) return;
+    baseIndex = 0; lastLen = 0;
+    try { r.start(); } catch { setTimeout(startRec, 300); }
+  };
+  rec = r;
+  try { r.start(); } catch { setTimeout(startRec, 300); }
+  armGiveUp();
+}
+function stopRec() { gen++; if (rec) { try { rec.abort(); } catch {} rec = null; } }
+function armGiveUp() {
+  clearTimeout(giveUpTimer);
+  giveUpTimer = setTimeout(() => { if (running && !judged) judge(); }, GIVE_UP_SEC * 1000);
+}
+
+function judge() {
+  if (judged || !running) return;
+  clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
+  judged = true;
+  const ok = hits.every(Boolean);
+  paint(true);
+  results.push({ idx: order[pos], ok, hits: hits.slice() });
+  if (ok) { ping(); $("card").classList.add("ok"); setStatus("正解！"); }
+  else setStatus(`${hits.filter(Boolean).length} / ${hits.length} 語。グレーの部分が言えていません。`);
+  setTimeout(next, ok ? 900 : 2200);
+}
+function next() {
+  if (!running) return;
+  pos++;
+  if (pos >= order.length) return finish();
+  baseIndex = lastLen;
+  show();
+  setStatus("聞き取り中…", true);
+  if (rec) armGiveUp(); else startRec();
+}
+function skip() {
+  if (!running || judged) return;
+  hits = hits.map(() => false);
+  judge();
+}
+
+async function start() {
+  $("error").hidden = true;
+  if (!Rec) { showError("このブラウザは音声認識に対応していません。Chrome（PC / Android）か Safari で開いてください。"); return; }
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
+  if (pos >= order.length || !$("results").hidden) loadList();
+  running = true;
+  $("startBtn").textContent = "一時停止"; $("skipBtn").disabled = false;
+  $("settingsBox").open = false;
+  setStatus("聞き取り中…", true);
+  show();
+  startRec();
+}
+function stop() {
+  running = false;
+  clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
+  stopRec();
+  try { wakeLock?.release(); } catch {}
+  $("startBtn").textContent = "再開"; $("skipBtn").disabled = true;
+  setStatus("一時停止中。再開すると今の文からやり直します。");
+}
+function finish() {
+  stop();
+  $("startBtn").textContent = "最初からもう一度";
+  $("bar").style.width = "100%";
+  const okCount = results.filter(r => r.ok).length;
+  setStatus(`終了。${results.length} 文中 ${okCount} 文を言えました。`);
+  $("sentence").textContent = ""; $("ja").textContent = ""; $("heard").textContent = "";
+  const box = $("results");
+  const h = document.createElement("h2"); h.textContent = "結果";
+  box.replaceChildren(h, ...results.map(r => {
+    const row = document.createElement("div"); row.className = "res";
+    const b = document.createElement("b"); b.className = r.ok ? "ok" : "ng"; b.textContent = r.ok ? "OK" : "もう一度";
+    const span = document.createElement("span");
+    items[r.idx].en.split(/\s+/).forEach((w, i) => {
+      const el = document.createElement("span"); el.textContent = w + " ";
+      if (!r.hits[i]) el.className = "miss";
+      span.append(el);
+    });
+    row.append(b, span); return row;
+  }));
+  box.hidden = false;
+  $("retryBtn").hidden = okCount === results.length;
+}
+function showError(msg) { $("error").textContent = msg; $("error").hidden = false; }
+
+$("startBtn").onclick = () => running ? stop() : start();
+$("skipBtn").onclick = skip;
+$("retryBtn").onclick = () => {
+  const missed = results.filter(r => !r.ok).map(r => r.idx);
+  loadList(missed);
+  start();
+};
+$("saveBtn").onclick = () => { store.set("list", $("list").value); if (running) stop(); loadList(); setStatus("保存しました。「スタート」で始めます。"); };
+$("resetBtn").onclick = () => { $("list").value = SAMPLE; store.set("list", SAMPLE); if (running) stop(); loadList(); };
+$("silence").value = silenceSec; $("silenceVal").textContent = silenceSec;
+$("silence").oninput = e => { silenceSec = parseFloat(e.target.value); $("silenceVal").textContent = silenceSec; store.set("silence", silenceSec); };
+$("shuffle").checked = store.get("shuffle", "0") === "1";
+$("shuffle").onchange = e => store.set("shuffle", e.target.checked ? "1" : "0");
+document.addEventListener("visibilitychange", () => { if (document.hidden && running) stop(); });
+
+$("list").value = store.get("list", SAMPLE);
+loadList();
+if (!Rec) showError("このブラウザは音声認識に対応していません。Chrome（PC / Android）か Safari で開いてください。");
+</script>
+</body>
+</html>
