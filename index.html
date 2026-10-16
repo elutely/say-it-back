@@ -277,12 +277,19 @@ function matchWords(targetWords, spokenText) {
   for (let i = n - 1; i >= 0; i--)
     for (let j = m - 1; j >= 0; j--)
       L[i][j] = same(t[i], s[j]) ? L[i+1][j+1] + 1 : Math.max(L[i+1][j], L[i][j+1]);
-  const hitTok = new Array(n).fill(false);
+  const hitTok = new Array(n).fill(false), usedS = new Array(m).fill(false);
   let i = 0, j = 0;
   while (i < n && j < m) {
-    if (same(t[i], s[j]) && L[i][j] === L[i+1][j+1] + 1) { hitTok[i] = true; i++; j++; }
+    if (same(t[i], s[j]) && L[i][j] === L[i+1][j+1] + 1) { hitTok[i] = true; usedS[j] = true; i++; j++; }
     else if (L[i+1][j] >= L[i][j+1]) i++;
     else j++;
+  }
+  // Second pass: a word missed in order and said again later (out of place) still counts.
+  // Each spoken word can be used once, so repeating "the" does not light up every "the".
+  for (let k = 0; k < n; k++) {
+    if (hitTok[k]) continue;
+    const at = s.findIndex((w, q) => !usedS[q] && same(t[k], w));
+    if (at >= 0) { hitTok[k] = true; usedS[at] = true; }
   }
   const total = new Array(targetWords.length).fill(0), got = new Array(targetWords.length).fill(0);
   owner.forEach((o, k) => { total[o]++; if (hitTok[k]) got[o]++; });
