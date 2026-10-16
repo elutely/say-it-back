@@ -38,6 +38,7 @@
   --accent: #4cc7b8; --accent-soft: #173b38; --warn: #e3a066; --line: #26343b; color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 body {
@@ -120,6 +121,17 @@ summary { cursor: pointer; font-weight: 500; }
 .mismatch { color: var(--warn); font-size: 13px; margin: 0; }
 @media (max-width: 560px) { .boxes { grid-template-columns: minmax(0, 1fr); } .box textarea { min-height: 160px; } }
 .hint { font-size: 13px; color: var(--pending); margin: 0; line-height: 1.6; }
+.sync { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sync h3 { font-size: 14px; margin: 0; }
+.sync ol { margin: 0; padding-left: 1.4em; font-size: 13px; color: var(--pending); line-height: 1.7; }
+.sync a { color: var(--accent); }
+.sync input[type=password] {
+  flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--ink);
+}
+.sync-state { font-size: 13px; margin: 0; color: var(--pending); }
+.sync-state.ok { color: var(--accent); }
+.sync-state.bad { color: var(--warn); }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .row label { font-size: 14px; }
 input[type=range] { accent-color: var(--accent); }
@@ -221,6 +233,25 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <div class="row">
         <label><input type="checkbox" id="shuffle"> 順番をシャッフル</label>
       </div>
+      <section class="sync" aria-labelledby="syncTitle">
+        <h3 id="syncTitle">スマホと PC の同期（GitHub）</h3>
+        <div id="syncSetup">
+          <ol>
+            <li><a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Say%20It%20Back" target="_blank" rel="noopener">GitHub の合言葉（トークン）作成ページ</a>を開く（「gist」だけにチェックが入っています）</li>
+            <li>Expiration（有効期限）を選んで、いちばん下の「Generate token」を押す</li>
+            <li>表示された <code>ghp_</code> で始まる文字列をコピーして、下に貼り付ける</li>
+          </ol>
+          <div class="row">
+            <input type="password" id="syncToken" placeholder="ghp_..." autocomplete="off" spellcheck="false" aria-label="GitHub の合言葉">
+            <button id="syncConnectBtn" type="button">つなぐ</button>
+          </div>
+        </div>
+        <div class="row" id="syncConnected" hidden>
+          <button id="syncNowBtn" type="button">今すぐ同期</button>
+          <button id="syncOffBtn" type="button">この端末の同期をやめる</button>
+        </div>
+        <p class="sync-state" id="syncState">同期していません。記録と英文リストはこのブラウザの中だけに保存されています。</p>
+      </section>
       <p class="hint">PC の Chrome 向けに作っています。Safari（iPhone）も音声認識に対応していますが、途中で聞き取りが止まることがあります。Firefox は非対応。音声認識はブラウザの機能を使うため、オンラインで使ってください。ファイルを直接開くと、文ごとにマイクの許可を聞かれます。URL（https か localhost）で開くと許可が記憶されます。</p>
     </div>
   </details>
@@ -642,6 +673,7 @@ function recordPractice() {
   days.push(today);
   store.set("days", JSON.stringify(days.slice(-400)));
   showStreak();
+  syncSoon();
 }
 function showStreak() {
   const st = streakNow();
@@ -654,6 +686,88 @@ function showStreak() {
   $("streak").setAttribute("aria-label", label);
   return st;
 }
+
+// ---- Sync between devices through a private GitHub gist ----
+// The token stays in this browser and only needs the "gist" permission. Practice days are merged
+// (union); the sentence list follows whichever device saved it last.
+const SYNC_FILE = "say-it-back-sync.json";
+const GH = "https://api.github.com";
+let syncBusy = false, syncAgain = false, syncTimer = null;
+function syncState(text, cls = "") { $("syncState").textContent = text; $("syncState").className = "sync-state " + cls; }
+function syncUi() {
+  const on = !!store.get("syncToken", "");
+  $("syncSetup").hidden = on; $("syncConnected").hidden = !on;
+}
+async function gh(path, opts = {}) {
+  const res = await fetch(GH + path, { ...opts, headers: {
+    "Authorization": "Bearer " + store.get("syncToken", ""), "Accept": "application/vnd.github+json",
+    ...(opts.body ? { "Content-Type": "application/json" } : {}) } });
+  if (res.status === 401) throw Object.assign(new Error("auth"), { code: 401 });
+  if (!res.ok) throw Object.assign(new Error("http " + res.status), { code: res.status });
+  return res.json();
+}
+function localData() {
+  return { days: practiceDays(), list: store.get("list", SAMPLE), listAt: +store.get("listAt", "0") || 0 };
+}
+// Pure merge of two copies: union of days, newer list wins.
+function mergeSync(a, b) {
+  const days = [...new Set([...(a.days || []), ...(b.days || [])])].sort().slice(-400);
+  const newer = (b.listAt || 0) > (a.listAt || 0) ? b : a;
+  return { days, list: newer.list ?? a.list, listAt: newer.listAt || 0 };
+}
+async function findGist() {
+  let id = store.get("gistId", "");
+  if (id) return id;
+  for (let page = 1; page <= 5; page++) {
+    const list = await gh(`/gists?per_page=100&page=${page}`);
+    const hit = list.find(g => g.files && g.files[SYNC_FILE]);
+    if (hit) { store.set("gistId", hit.id); return hit.id; }
+    if (list.length < 100) break;
+  }
+  const made = await gh("/gists", { method: "POST", body: JSON.stringify({
+    description: "Say It Back の練習記録（アプリが自動で使います）", public: false,
+    files: { [SYNC_FILE]: { content: JSON.stringify(localData(), null, 1) } } }) });
+  store.set("gistId", made.id);
+  return made.id;
+}
+async function syncNow() {
+  if (!store.get("syncToken", "")) return;
+  if (syncBusy) { syncAgain = true; return; }
+  syncBusy = true;
+  syncState("同期中…");
+  try {
+    const id = await findGist();
+    const g = await gh("/gists/" + id);
+    const f = g.files?.[SYNC_FILE];
+    let remote = {};
+    if (f) {
+      const text = f.truncated ? await (await fetch(f.raw_url)).text() : f.content;
+      try { remote = JSON.parse(text) || {}; } catch {}
+    }
+    const local = localData();
+    const merged = mergeSync(local, remote);
+    if (JSON.stringify(merged.days) !== JSON.stringify(local.days)) { store.set("days", JSON.stringify(merged.days)); showStreak(); }
+    if (merged.listAt > local.listAt && merged.list !== local.list) {
+      store.set("list", merged.list); store.set("listAt", String(merged.listAt));
+      renderBoxes(merged.list);
+      if (!running) loadList();
+    }
+    const out = JSON.stringify(merged, null, 1);
+    if (!f || out !== JSON.stringify(remote, null, 1)) {
+      await gh("/gists/" + id, { method: "PATCH", body: JSON.stringify({ files: { [SYNC_FILE]: { content: out } } }) });
+    }
+    const t = new Date();
+    syncState(`同期しました（${t.getHours()}:${String(t.getMinutes()).padStart(2, "0")}）`, "ok");
+  } catch (err) {
+    if (err.code === 401) syncState("GitHub の合言葉が正しくないか、期限が切れています。「この端末の同期をやめる」を押して、新しい合言葉でつなぎ直してください。", "bad");
+    else if (err.code === 404) { store.set("gistId", ""); syncState("同期先が見つかりませんでした。「今すぐ同期」で作り直します。", "bad"); }
+    else syncState("同期できませんでした（オフラインかもしれません）。記録はこの端末に残っていて、次に開いたときにまた同期します。", "bad");
+  } finally {
+    syncBusy = false;
+    if (syncAgain) { syncAgain = false; syncNow(); }
+  }
+}
+function syncSoon() { clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 1500); }
 
 function judge() {
   if (judged || !running) return;
@@ -935,8 +1049,8 @@ $("retryBtn").onclick = () => {
   loadList(missed);
   start();
 };
-$("saveBtn").onclick = () => { store.set("list", listText()); if (running) stop(); loadList(); setStatus("保存しました。「スタート」で始めます。"); };
-$("resetBtn").onclick = () => { renderBoxes(SAMPLE); store.set("list", SAMPLE); if (running) stop(); loadList(); };
+$("saveBtn").onclick = () => { store.set("list", listText()); store.set("listAt", String(Date.now())); syncSoon(); if (running) stop(); loadList(); setStatus("保存しました。「スタート」で始めます。"); };
+$("resetBtn").onclick = () => { renderBoxes(SAMPLE); store.set("list", SAMPLE); store.set("listAt", String(Date.now())); syncSoon(); if (running) stop(); loadList(); };
 $("silence").value = silenceSec; $("silenceVal").textContent = silenceSec;
 $("silence").oninput = e => { silenceSec = parseFloat(e.target.value); $("silenceVal").textContent = silenceSec; store.set("silence", silenceSec); };
 $("shuffle").checked = store.get("shuffle", "0") === "1";
@@ -960,6 +1074,23 @@ syncThemeLabel();
   const st = showStreak();
   if (!st.doneToday && st.current) setStatus(`「スタート」を押すと始まります。今日練習すると${st.current + 1}日連続になります。`);
 }
+$("syncConnectBtn").onclick = () => {
+  const tok = $("syncToken").value.trim();
+  if (!tok) { syncState("合言葉を貼り付けてから「つなぐ」を押してください。", "bad"); return; }
+  store.set("syncToken", tok); store.set("gistId", "");
+  $("syncToken").value = "";
+  syncUi(); syncNow();
+};
+$("syncNowBtn").onclick = syncNow;
+$("syncOffBtn").onclick = () => {
+  store.set("syncToken", ""); store.set("gistId", "");
+  syncUi(); syncState("この端末の同期をやめました。記録はこの端末に残っています。GitHub 側の記録も消えていません。");
+};
+// A list saved before syncing existed has no time: let it win over an untouched sample list elsewhere.
+if (!store.get("listAt", "") && store.get("list", SAMPLE) !== SAMPLE) store.set("listAt", "1");
+syncUi();
+syncNow();
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !running) syncNow(); });
 
 renderBoxes(store.get("list", SAMPLE));
 ["enBox", "jaBox"].forEach(id => $(id).addEventListener("input", checkBoxes));
