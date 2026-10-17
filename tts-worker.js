@@ -25,8 +25,9 @@ self.onmessage = e => {
   queue = queue.then(async () => {
     try {
       const tts = await load();
+      const t0 = performance.now();
       const audio = await tts.generate(text, { voice });
-      postMessage({ type: "audio", id, blob: audio.toBlob() });
+      postMessage({ type: "audio", id, blob: audio.toBlob(), ms: performance.now() - t0 });
     } catch (err) {
       postMessage({ type: "error", id, message: String(err?.message || err) });
     }

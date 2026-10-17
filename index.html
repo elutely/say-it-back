@@ -371,6 +371,8 @@ let recState = "off", preText = [];
 const MIC_LEAD_MS = 700;
 let cueOn = store.get("cue", "1") === "1";
 let silenceTimer = null, giveUpTimer = null, audio = null, wakeLock = null;
+// When the heard text last changed: Chrome sends the final result ~0.7 s after speech ends, which must not add to the silence wait.
+let lastHeard = "", lastHeardAt = 0;
 let silenceSec = parseFloat(store.get("silence", "2")) || 2;
 const GIVE_UP_SEC = 12;
 let ttsOn = store.get("tts", "1") === "1";
@@ -379,7 +381,7 @@ let rate = parseFloat(store.get("rate", "0.9")) || 0.9;
 let voiceName = store.get("voice", "k:af_heart");
 if (!/^[kd]:/.test(voiceName)) voiceName = voiceName ? "d:" + voiceName : "k:af_heart";
 const synth = window.speechSynthesis;
-let currentUtterance = null, noStartTimer = null, ttsUnlocked = false;
+let currentUtterance = null, noStartTimer = null, ttsUnlocked = false, cancelledAt = -1e9;
 const NATURAL = [
   ["af_heart", "Heart（アメリカ・女性）", "en-US"],
   ["am_michael", "Michael（アメリカ・男性）", "en-US"],
@@ -417,6 +419,7 @@ function startWorker() {
       tts.pending.delete(m.id);
       genNote();
       if (m.type === "error") return p.resolve(null);
+      if (m.ms && p.chars) tts.msPerChar = tts.msPerChar ? tts.msPerChar * 0.6 + m.ms / p.chars * 0.4 : m.ms / p.chars;
       const url = URL.createObjectURL(m.blob);
       tts.urls.set(p.key, url);
       cachePut(p.key, m.blob);
@@ -461,7 +464,7 @@ function generate(voice, text) {
     if (!startWorker()) return null;
     return new Promise(resolve => {
       const id = ++tts.nextId;
-      tts.pending.set(id, { key, resolve });
+      tts.pending.set(id, { key, resolve, chars: text.length });
       tts.worker.postMessage({ type: "gen", id, text, voice });
       genNote();
     });
@@ -470,6 +473,14 @@ function generate(voice, text) {
   return job;
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Estimated time until the audio for key is made: it and every sentence queued before it.
+// Before the first one is made the speed is unknown: only the sentence being made now counts as fitting.
+function genWaitMs(key) {
+  if (!tts.msPerChar) return tts.pending.values().next().value?.key === key ? 0 : Infinity;
+  let chars = 0;
+  for (const p of tts.pending.values()) { chars += p.chars; if (p.key === key) break; }
+  return chars * tts.msPerChar;
+}
 // Where the audio for text comes from: pre-made file, then audio made earlier on this device, then make it now.
 // Waits for a new one only while the model is ready; during the first download the device voice reads instead.
 async function naturalSource(text) {
@@ -479,9 +490,13 @@ async function naturalSource(text) {
   if (manifest[voice]?.[text]) return "audio/" + manifest[voice][text];
   const job = generate(voice, text);
   if (tts.state === "failed") return null;
-  // Don't make the learner wait for a slow phone: give it a moment, then read with the device voice
-  // this time. The job keeps running and is saved, so the next time this sentence is instant.
-  return Promise.race([job, sleep(tts.state === "ready" ? 1500 : 800).then(() => null)]);
+  // Made earlier on this device: use it.
+  const saved = await cacheGet(genKey(voice, text));
+  if (saved) return saved;
+  // Don't make the learner wait for a slow phone: wait only if it should be done within 1.5 s,
+  // otherwise read with the device voice this time. The job keeps running and is saved for next time.
+  if (tts.state !== "ready" || genWaitMs(genKey(voice, text)) > 1500) return null;
+  return Promise.race([job, sleep(1500).then(() => null)]);
 }
 // Makes the audio for the upcoming sentences in the background.
 function prefetch(texts) {
@@ -649,6 +664,7 @@ function show() {
   hits = words.map(() => false);
   judged = false;
   completing = false;
+  lastHeard = "";
   $("sentence").replaceChildren(...words.map(w => {
     const s = document.createElement("span"); s.className = "w"; s.textContent = w; return s;
   }));
@@ -722,6 +738,7 @@ function startRec() {
     [heard, ...interim.slice(1).map(a => finalText + " " + a)].forEach(txt =>
       matchWords(words, txt).forEach((h, i) => { if (h) hits[i] = true; }));
     $("heard").textContent = heard;
+    if (heard !== lastHeard) { lastHeard = heard; lastHeardAt = performance.now(); }
     paint(false);
     clearTimeout(giveUpTimer);
     if (hits.every(Boolean)) {
@@ -730,7 +747,8 @@ function startRec() {
       return;
     }
     clearTimeout(silenceTimer);
-    silenceTimer = setTimeout(judge, silenceSec * 1000);
+    const quiet = lastHeard ? performance.now() - lastHeardAt : 0;
+    silenceTimer = setTimeout(judge, Math.max(0, silenceSec * 1000 - quiet));
   };
   r.onerror = e => {
     if (my !== gen) return;
@@ -974,7 +992,7 @@ function stopSay() {
   sayGen++;
   clearTimeout(sayTimer); clearTimeout(noStartTimer); clearTimeout(nearTimer);
   players.forEach(el => { try { el.pause(); } catch {} });
-  try { if (synth && (synth.speaking || synth.pending)) synth.cancel(); } catch {}
+  try { if (synth && (synth.speaking || synth.pending)) { synth.cancel(); cancelledAt = performance.now(); } } catch {}
 }
 // Reads text aloud with the chosen voice: pre-made natural audio if there is one, otherwise the device voice.
 // done() runs once when playback ends or fails; onStart() when sound begins.
@@ -1053,12 +1071,12 @@ function sayDevice(text, my, finish, onStart) {
     showError("お手本の読み上げが始まりませんでした。端末の音量と、マナーモードを確認してください。");
     finish();
   }, 5000);
-  // Android Chrome drops an utterance queued right after cancel(), so leave a short gap.
+  // Android Chrome drops an utterance queued right after cancel(), so leave a short gap after one.
   setTimeout(() => {
     if (my !== sayGen) return;
     try { synth.resume(); } catch {}
     synth.speak(u);
-  }, 250);
+  }, Math.max(0, 250 - (performance.now() - cancelledAt)));
 }
 function playModel() {
   if (!running || judged) return;
