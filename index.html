@@ -409,12 +409,13 @@ function startWorker() {
       const [l, t] = Object.values(tts.files).reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]);
       if (tts.state === "loading" && t) note(`自然な声のデータを読み込み中… ${Math.floor(l / t * 100)}%（初回のみ・約90MB）`);
     } else if (m.type === "ready") {
-      tts.state = "ready"; note("");
+      tts.state = "ready"; note(""); genNote();
     } else if (m.type === "fail") {
       genFailed("自然な声を端末で作れませんでした。追加した英文は端末の声で読み上げます。");
     } else if (m.type === "audio" || m.type === "error") {
       const p = tts.pending.get(m.id); if (!p) return;
       tts.pending.delete(m.id);
+      genNote();
       if (m.type === "error") return p.resolve(null);
       const url = URL.createObjectURL(m.blob);
       tts.urls.set(p.key, url);
@@ -425,6 +426,12 @@ function startWorker() {
   tts.worker.onerror = () => genFailed("自然な声を端末で作れませんでした。追加した英文は端末の声で読み上げます。");
   tts.worker.postMessage({ type: "load" });
   return tts.worker;
+}
+// While sentences are still being made, say so: until each is ready it is read with the device voice.
+function genNote() {
+  if (tts.state !== "ready") return;
+  const left = tts.pending.size;
+  note(left ? `自然な声を作成中… 残り ${left} 文（できるまでは端末の声で読みます）` : "");
 }
 function genFailed(msg) {
   tts.state = "failed";
@@ -456,6 +463,7 @@ function generate(voice, text) {
       const id = ++tts.nextId;
       tts.pending.set(id, { key, resolve });
       tts.worker.postMessage({ type: "gen", id, text, voice });
+      genNote();
     });
   }).finally(() => inflight.delete(key));
   inflight.set(key, job);
@@ -471,7 +479,9 @@ async function naturalSource(text) {
   if (manifest[voice]?.[text]) return "audio/" + manifest[voice][text];
   const job = generate(voice, text);
   if (tts.state === "failed") return null;
-  return Promise.race([job, sleep(tts.state === "ready" ? 12000 : 1500).then(() => null)]);
+  // Don't make the learner wait for a slow phone: give it a moment, then read with the device voice
+  // this time. The job keeps running and is saved, so the next time this sentence is instant.
+  return Promise.race([job, sleep(tts.state === "ready" ? 1500 : 800).then(() => null)]);
 }
 // Makes the audio for the upcoming sentences in the background.
 function prefetch(texts) {
@@ -911,7 +921,8 @@ function next() {
 // Each sentence: play the model (if on), then listen. Speech heard while the model plays is ignored.
 function begin() {
   $("replayBtn").disabled = !ttsOn;
-  if (ttsOn) prefetch([items[order[pos]]?.en, items[order[pos + 1]]?.en]);
+  // Queue the whole remaining list (current sentence first), so later sentences are ready in time.
+  if (ttsOn) prefetch(order.slice(pos).map(i => items[i]?.en));
   if (ttsOn) playModel(); else listen();
 }
 // A fresh recognizer per sentence: the mic is off while the model plays, so its voice is never picked up.
