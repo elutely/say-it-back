@@ -91,9 +91,15 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 @media (prefers-reduced-motion: reduce) { .listening .dot { animation: none; } .w, .bar > i { transition: none; } }
 
 .controls { display: flex; gap: 10px; flex-wrap: wrap; }
-.voice-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
-.voice-bar label { color: var(--pending); }
-.voice-bar select { flex: 1; min-width: 0; }
+.voice-bar, .set-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
+.voice-bar label, .set-bar label { color: var(--pending); min-width: 7.5em; }
+.voice-bar select, .set-bar select { flex: 1; min-width: 0; }
+.set-name { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.set-name label { font-size: 13px; color: var(--pending); }
+.set-name input {
+  flex: 1; min-width: 0; font: inherit; font-size: 15px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--ink);
+}
 .voice-bar button { padding: 8px 14px; font-size: 14px; }
 .tts-note { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--pending); font-variant-numeric: tabular-nums; }
 button {
@@ -183,6 +189,11 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <section class="results" id="results" hidden></section>
   </main>
 
+  <div class="set-bar">
+    <label for="setSelect">練習するセット</label>
+    <select id="setSelect"></select>
+  </div>
+
   <div class="voice-bar" id="voiceBar">
     <label for="voice">お手本の声</label>
     <select id="voice"></select>
@@ -195,12 +206,17 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <button id="replayBtn" type="button" disabled>もう一度聞く</button>
     <button id="skipBtn" type="button" disabled>スキップ</button>
     <button id="retryBtn" type="button" hidden>言えなかった文だけもう一度</button>
+    <button id="homeBtn" type="button" hidden>最初の画面に戻る</button>
   </div>
 
   <details id="settingsBox">
     <summary>英文リストと設定</summary>
     <div class="settings">
-      <p class="hint">英文と和訳をそれぞれの欄に1行に1文ずつ入れます。同じ行どうしが組になります。和訳は空でも使えます。リストはこのブラウザに保存されます。</p>
+      <p class="hint">英文のリストは「セット」ごとに名前を付けて、いくつでも保存できます。下で編集しているのは、最初の画面で選んでいるセットです。英文と和訳はそれぞれの欄に1行に1文ずつ入れ、同じ行どうしが組になります（和訳は空でも可）。</p>
+      <div class="set-name">
+        <label for="setName">セット名</label>
+        <input id="setName" type="text" maxlength="40" placeholder="例：旅行の英会話">
+      </div>
       <div class="boxes">
         <div class="box">
           <label for="enBox">英文 <span id="enCount"></span></label>
@@ -213,8 +229,9 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       </div>
       <p class="mismatch" id="mismatch" hidden></p>
       <div class="row">
-        <button id="saveBtn" type="button">保存して最初から</button>
-        <button id="resetBtn" type="button">サンプルに戻す</button>
+        <button id="saveBtn" type="button">このセットを保存</button>
+        <button id="newSetBtn" type="button">＋ 新しいセット</button>
+        <button id="delSetBtn" type="button">このセットを削除</button>
       </div>
       <div class="row">
         <label><input type="checkbox" id="tts"> お手本を読み上げてからリピート</label>
@@ -504,12 +521,106 @@ function syncScroll(from, to) {
   syncing = true; $(to).scrollTop = $(from).scrollTop;
   requestAnimationFrame(() => { syncing = false; });
 }
+// ---- Sentence sets: several named lists, one of them chosen for practice ----
+// A set: { id, name, list ("en | ja" lines), at (last saved, ms), created, deleted? }.
+// Deleted sets stay as markers so the deletion also reaches other devices through sync.
+function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function readSets() {
+  let sets = null;
+  try { sets = JSON.parse(store.get("sets", "null")); } catch {}
+  if (!Array.isArray(sets)) {
+    // First run with sets: the sample, plus the one list saved by earlier versions (fixed ids, so devices agree).
+    sets = [{ id: "sample", name: "サンプル", list: SAMPLE, at: 0, created: 0 }];
+    const old = store.get("list", "");
+    if (old && old !== SAMPLE) sets.push({ id: "legacy", name: "マイリスト", list: old, at: +store.get("listAt", "1") || 1, created: 1 });
+    store.set("sets", JSON.stringify(sets));
+    if (!store.get("setId", "")) store.set("setId", sets.at(-1).id);
+  }
+  return sets;
+}
+function writeSets(sets) { store.set("sets", JSON.stringify(sets)); }
+function liveSets() { return readSets().filter(x => !x.deleted); }
+function currentSet() {
+  const live = liveSets();
+  return live.find(x => x.id === store.get("setId", "")) || live[0] || null;
+}
+function ensureOneSet() {
+  if (liveSets().length) return;
+  const sets = readSets();
+  sets.push({ id: newId(), name: "サンプル", list: SAMPLE, at: Date.now(), created: Date.now() });
+  writeSets(sets);
+}
+function renderSets() {
+  ensureOneSet();
+  const cur = currentSet();
+  $("setSelect").replaceChildren(...liveSets().map(x => {
+    const o = document.createElement("option");
+    o.value = x.id; o.textContent = `${x.name}（${parseList(x.list).length}文）`; o.selected = x.id === cur.id;
+    return o;
+  }));
+  $("setName").value = cur.name;
+  renderBoxes(cur.list);
+}
+function chooseSet(id) {
+  store.set("setId", id);
+  if (running) stop();
+  renderSets();
+  goHome();
+}
+function saveCurrentSet() {
+  const sets = readSets(), cur = currentSet();
+  const x = sets.find(y => y.id === cur.id);
+  x.name = $("setName").value.trim() || "名前なし";
+  x.list = listText();
+  x.at = Date.now();
+  writeSets(sets);
+  syncSoon();
+  renderSets();
+  goHome();
+  setStatus(`「${x.name}」を保存しました。「スタート」で始めます。`);
+}
+function addSet() {
+  const sets = readSets(), now = Date.now();
+  const n = sets.filter(x => !x.deleted).length + 1;
+  const x = { id: newId(), name: `新しいセット ${n}`, list: "", at: now, created: now };
+  sets.push(x);
+  writeSets(sets);
+  store.set("setId", x.id);
+  syncSoon();
+  renderSets();
+  goHome();
+  $("settingsBox").open = true;
+  $("setName").focus(); $("setName").select();
+  setStatus("新しいセットを作りました。名前と英文を入れて「このセットを保存」を押してください。");
+}
+let delArmed = null;
+function deleteSet() {
+  const cur = currentSet();
+  // Two-step delete: the first press asks, the second (within 4 seconds) deletes.
+  if (delArmed !== cur.id) {
+    delArmed = cur.id;
+    $("delSetBtn").textContent = `「${cur.name}」を削除する（もう一度押す）`;
+    setTimeout(() => { if (delArmed === cur.id) { delArmed = null; $("delSetBtn").textContent = "このセットを削除"; } }, 4000);
+    return;
+  }
+  delArmed = null; $("delSetBtn").textContent = "このセットを削除";
+  const sets = readSets();
+  const x = sets.find(y => y.id === cur.id);
+  x.deleted = true; x.list = ""; x.at = Date.now();
+  writeSets(sets);
+  store.set("setId", liveSets()[0]?.id || "");
+  syncSoon();
+  renderSets();
+  goHome();
+  setStatus(`「${cur.name}」を削除しました。`);
+}
+
 function loadList(indices) {
-  items = parseList(listText());
+  items = parseList(currentSet()?.list || "");
   order = indices || items.map((_, i) => i);
   if (!indices && $("shuffle").checked) order.sort(() => Math.random() - 0.5);
   pos = 0; results = [];
-  $("results").hidden = true; $("retryBtn").hidden = true;
+  $("results").hidden = true; $("retryBtn").hidden = true; $("homeBtn").hidden = true;
   show();
 }
 function show() {
@@ -707,13 +818,19 @@ async function gh(path, opts = {}) {
   return res.json();
 }
 function localData() {
-  return { days: practiceDays(), list: store.get("list", SAMPLE), listAt: +store.get("listAt", "0") || 0 };
+  return { days: practiceDays(), sets: readSets() };
 }
 // Pure merge of two copies: union of days, newer list wins.
 function mergeSync(a, b) {
   const days = [...new Set([...(a.days || []), ...(b.days || [])])].sort().slice(-400);
-  const newer = (b.listAt || 0) > (a.listAt || 0) ? b : a;
-  return { days, list: newer.list ?? a.list, listAt: newer.listAt || 0 };
+  // Sets: matched by id; for each, the copy saved last wins (a deletion is a save too).
+  const byId = new Map();
+  [...(a.sets || []), ...(b.sets || [])].forEach(x => {
+    const have = byId.get(x.id);
+    if (!have || (x.at || 0) > (have.at || 0)) byId.set(x.id, x);
+  });
+  const sets = [...byId.values()].sort((x, y) => (x.created || 0) - (y.created || 0));
+  return { days, sets };
 }
 async function findGist() {
   let id = store.get("gistId", "");
@@ -747,10 +864,9 @@ async function syncNow() {
     const local = localData();
     const merged = mergeSync(local, remote);
     if (JSON.stringify(merged.days) !== JSON.stringify(local.days)) { store.set("days", JSON.stringify(merged.days)); showStreak(); }
-    if (merged.listAt > local.listAt && merged.list !== local.list) {
-      store.set("list", merged.list); store.set("listAt", String(merged.listAt));
-      renderBoxes(merged.list);
-      if (!running) loadList();
+    if (JSON.stringify(merged.sets) !== JSON.stringify(local.sets)) {
+      writeSets(merged.sets);
+      if (!running) { renderSets(); loadList(); }
     }
     const out = JSON.stringify(merged, null, 1);
     if (!f || out !== JSON.stringify(remote, null, 1)) {
@@ -947,7 +1063,7 @@ async function start() {
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   if (pos >= order.length || !$("results").hidden) loadList();
   running = true;
-  $("startBtn").textContent = "一時停止"; $("skipBtn").disabled = false; $("previewBtn").disabled = true;
+  $("startBtn").textContent = "一時停止"; $("skipBtn").disabled = false; $("previewBtn").disabled = true; $("setSelect").disabled = true;
   $("settingsBox").open = false;
   show();
   begin();
@@ -958,7 +1074,7 @@ function stop() {
   endModel();
   stopRec();
   try { wakeLock?.release(); } catch {}
-  $("startBtn").textContent = "再開"; $("skipBtn").disabled = true; $("replayBtn").disabled = true; $("previewBtn").disabled = false;
+  $("startBtn").textContent = "再開"; $("skipBtn").disabled = true; $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setSelect").disabled = false;
   setStatus("一時停止中。再開すると今の文からやり直します。");
 }
 function finish() {
@@ -1004,6 +1120,15 @@ function finish() {
   }));
   box.hidden = false;
   $("retryBtn").hidden = okCount === results.length;
+  $("homeBtn").hidden = false;
+}
+// Back to the start screen without reloading: first sentence of the chosen set, ready to start.
+function goHome() {
+  if (running) stop();
+  loadList();
+  $("startBtn").textContent = "スタート";
+  setStatus("「スタート」を押すと、表示された英文を聞き取り始めます。");
+  window.scrollTo({ top: 0 });
 }
 function showError(msg) { $("error").textContent = msg; $("error").hidden = false; }
 
@@ -1049,8 +1174,11 @@ $("retryBtn").onclick = () => {
   loadList(missed);
   start();
 };
-$("saveBtn").onclick = () => { store.set("list", listText()); store.set("listAt", String(Date.now())); syncSoon(); if (running) stop(); loadList(); setStatus("保存しました。「スタート」で始めます。"); };
-$("resetBtn").onclick = () => { renderBoxes(SAMPLE); store.set("list", SAMPLE); store.set("listAt", String(Date.now())); syncSoon(); if (running) stop(); loadList(); };
+$("saveBtn").onclick = saveCurrentSet;
+$("newSetBtn").onclick = addSet;
+$("delSetBtn").onclick = deleteSet;
+$("setSelect").onchange = e => chooseSet(e.target.value);
+$("homeBtn").onclick = goHome;
 $("silence").value = silenceSec; $("silenceVal").textContent = silenceSec;
 $("silence").oninput = e => { silenceSec = parseFloat(e.target.value); $("silenceVal").textContent = silenceSec; store.set("silence", silenceSec); };
 $("shuffle").checked = store.get("shuffle", "0") === "1";
@@ -1086,13 +1214,11 @@ $("syncOffBtn").onclick = () => {
   store.set("syncToken", ""); store.set("gistId", "");
   syncUi(); syncState("この端末の同期をやめました。記録はこの端末に残っています。GitHub 側の記録も消えていません。");
 };
-// A list saved before syncing existed has no time: let it win over an untouched sample list elsewhere.
-if (!store.get("listAt", "") && store.get("list", SAMPLE) !== SAMPLE) store.set("listAt", "1");
 syncUi();
 syncNow();
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !running) syncNow(); });
 
-renderBoxes(store.get("list", SAMPLE));
+renderSets();
 ["enBox", "jaBox"].forEach(id => $(id).addEventListener("input", checkBoxes));
 $("enBox").addEventListener("scroll", () => syncScroll("enBox", "jaBox"));
 $("jaBox").addEventListener("scroll", () => syncScroll("jaBox", "enBox"));
