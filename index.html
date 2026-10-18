@@ -250,6 +250,26 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <div class="row">
         <label><input type="checkbox" id="shuffle"> 順番をシャッフル</label>
       </div>
+      <section class="sync" aria-labelledby="gTitle">
+        <h3 id="gTitle">Google の自然な声（任意）</h3>
+        <div id="gSetup">
+          <ol>
+            <li><a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud コンソール</a>でプロジェクトを作り、支払い情報を登録する（毎月の無料枠があり、このアプリの使い方ならまず超えません）</li>
+            <li><a href="https://console.cloud.google.com/apis/library/texttospeech.googleapis.com" target="_blank" rel="noopener">Cloud Text-to-Speech API</a> を「有効にする」</li>
+            <li><a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">認証情報</a>で「認証情報を作成」→「API キー」</li>
+            <li>作ったキーを開き、「アプリケーションの制限」を「ウェブサイト」にして <code>https://elutely.github.io/*</code> を追加、「API の制限」で「Cloud Text-to-Speech API」だけを選んで保存</li>
+            <li><code>AIza</code> で始まるキーをコピーして、下に貼り付ける</li>
+          </ol>
+          <div class="row">
+            <input type="password" id="gKey" placeholder="AIza..." autocomplete="off" spellcheck="false" aria-label="Google の API キー">
+            <button id="gConnectBtn" type="button">つなぐ</button>
+          </div>
+        </div>
+        <div class="row" id="gConnected" hidden>
+          <button id="gOffBtn" type="button">この端末で使うのをやめる</button>
+        </div>
+        <p class="sync-state" id="gState">使っていません。キーはこの端末の中だけに保存され、同期もされません。</p>
+      </section>
       <section class="sync" aria-labelledby="syncTitle">
         <h3 id="syncTitle">スマホと PC の同期（GitHub）</h3>
         <div id="syncSetup">
@@ -377,9 +397,11 @@ let silenceSec = parseFloat(store.get("silence", "2")) || 2;
 const GIVE_UP_SEC = 12;
 let ttsOn = store.get("tts", "1") === "1";
 let rate = parseFloat(store.get("rate", "0.9")) || 0.9;
-// Voice ids: "k:<name>" = natural voice (Kokoro, pre-made audio files), "d:<name>" = a voice built into the device.
+// Voice ids: "k:<name>" = natural voice (Kokoro, pre-made audio files), "d:<name>" = a voice built into the device,
+// "g:<name>" = Google Cloud voice (needs the learner's own API key).
 let voiceName = store.get("voice", "k:af_heart");
-if (!/^[kd]:/.test(voiceName)) voiceName = voiceName ? "d:" + voiceName : "k:af_heart";
+if (!/^[kdg]:/.test(voiceName)) voiceName = voiceName ? "d:" + voiceName : "k:af_heart";
+if (voiceName.startsWith("g:") && !store.get("gKey", "")) voiceName = "k:af_heart";
 const synth = window.speechSynthesis;
 let currentUtterance = null, noStartTimer = null, ttsUnlocked = false, cancelledAt = -1e9;
 const NATURAL = [
@@ -484,6 +506,11 @@ function genWaitMs(key) {
 // Where the audio for text comes from: pre-made file, then audio made earlier on this device, then make it now.
 // Waits for a new one only while the model is ready; during the first download the device voice reads instead.
 async function naturalSource(text) {
+  if (voiceName.startsWith("g:")) {
+    if (!store.get("gKey", "") || g.failed) return null;
+    // Usually back in well under a second; on a bad connection read with the device voice this time.
+    return Promise.race([gGenerate(voiceName.slice(2), text), sleep(2500).then(() => null)]);
+  }
   if (!voiceName.startsWith("k:")) return null;
   const voice = voiceName.slice(2);
   await manifestReady;
@@ -500,9 +527,70 @@ async function naturalSource(text) {
 }
 // Makes the audio for the upcoming sentences in the background.
 function prefetch(texts) {
+  if (voiceName.startsWith("g:")) {
+    if (store.get("gKey", "") && !g.failed) texts.filter(Boolean).forEach(t => gGenerate(voiceName.slice(2), t));
+    return;
+  }
   if (!voiceName.startsWith("k:") || tts.state === "failed") return;
   const voice = voiceName.slice(2);
   manifestReady.then(() => texts.filter(Boolean).forEach(t => { if (!manifest[voice]?.[t]) generate(voice, t); }));
+}
+
+// ---- Google Cloud Text-to-Speech (Chirp 3: HD voices), with the learner's own API key ----
+// The key stays in this browser. Each sentence is made once per voice and kept in Cache Storage like the Kokoro audio.
+const GTTS = "https://texttospeech.googleapis.com/v1";
+const g = { failed: false, running: 0, queue: [] };
+const gCacheKey = (name, text) => genKey("google/" + name, text);
+function gVoices() { try { return JSON.parse(store.get("gVoices", "[]")) || []; } catch { return []; } }
+async function gCall(path, body) {
+  const res = await fetch(GTTS + path + (path.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(store.get("gKey", "")),
+    body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error?.message || "http " + res.status), { code: res.status });
+  return data;
+}
+// The English Chirp 3: HD voices this key can use, as [{ name, lang, gender }].
+async function gListVoices() {
+  const data = await gCall("/voices");
+  return (data.voices || []).filter(v => /^en-(US|GB)-Chirp3-HD-/.test(v.name))
+    .map(v => ({ name: v.name, lang: v.name.slice(0, 5), gender: v.ssmlGender }))
+    .sort((a, b) => a.lang === b.lang ? a.name.localeCompare(b.name) : a.lang === "en-US" ? -1 : 1);
+}
+// A rejected key or a used-up quota stops Google for this visit; a dropped connection only skips that sentence.
+function gFailed(err) {
+  if (g.failed || ![400, 403, 429].includes(err.code)) return;
+  g.failed = true;
+  const why = err.code === 403 || err.code === 400 ? "キーが使えないか、制限の設定が合っていません" : err.code === 429 ? "使用量の上限に達しました" : "つながりませんでした";
+  note(`Google の声を使えませんでした（${why}）。今回は端末の声で読みます。`);
+}
+// A few requests at a time, in the order asked (the current sentence is always asked first).
+function gGenerate(name, text) {
+  const key = gCacheKey(name, text);
+  if (inflight.has(key)) return inflight.get(key);
+  const job = cacheGet(key).then(hit => hit || (g.failed ? null : new Promise(resolve => { g.queue.push({ name, text, key, resolve }); gPump(); })))
+    .finally(() => inflight.delete(key));
+  inflight.set(key, job);
+  return job;
+}
+function gPump() {
+  while (g.running < 3 && g.queue.length) {
+    const { name, text, key, resolve } = g.queue.shift();
+    if (g.failed) { resolve(null); continue; }
+    g.running++;
+    gCall("/text:synthesize", { input: { text }, voice: { languageCode: name.slice(0, 5), name }, audioConfig: { audioEncoding: "MP3" } })
+      .then(data => {
+        const bin = atob(data.audioContent || "");
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: "audio/mpeg" });
+        const url = URL.createObjectURL(blob);
+        tts.urls.set(key, url);
+        cachePut(key, blob);
+        resolve(url);
+      })
+      .catch(err => { gFailed(err); resolve(null); })
+      .finally(() => { g.running--; gPump(); });
+  }
 }
 // One audio element for the whole session: phones only let an element play from a timer after it was started in a tap.
 // Two elements: one plays, the other loads the next sentence ahead of time, so playback starts at once.
@@ -950,10 +1038,11 @@ function begin() {
 // Loads the next sentence's model voice into the idle element while the learner is speaking.
 async function warmNext() {
   const text = items[order[pos + 1]]?.en;
-  if (!text || !ttsOn || !voiceName.startsWith("k:")) return;
+  if (!text || !ttsOn || !/^[kg]:/.test(voiceName)) return;
   await manifestReady;
   const voice = voiceName.slice(2);
-  const url = manifest[voice]?.[text] ? "audio/" + manifest[voice][text] : await cacheGet(genKey(voice, text));
+  const url = voiceName.startsWith("g:") ? await cacheGet(gCacheKey(voice, text))
+    : manifest[voice]?.[text] ? "audio/" + manifest[voice][text] : await cacheGet(genKey(voice, text));
   if (!url || players.some(el => el.dataset.url === url)) return;
   const idle = players.find(el => el !== player);
   if (!idle.paused) return;
@@ -978,7 +1067,7 @@ function listen() {
 function deviceVoice() {
   const en = synth ? synth.getVoices().filter(v => /^en[-_]/i.test(v.lang)) : [];
   const want = voiceName.startsWith("d:") ? voiceName.slice(2) : "";
-  const accent = (NATURAL.find(n => "k:" + n[0] === voiceName) || [, , "en-US"])[2].slice(3);
+  const accent = voiceName.startsWith("g:") ? voiceName.slice(5, 7) : (NATURAL.find(n => "k:" + n[0] === voiceName) || [, , "en-US"])[2].slice(3);
   return en.find(v => v.name === want) || en.find(v => new RegExp("en[-_]" + accent, "i").test(v.lang)) || en[0] || null;
 }
 // Phones allow sound only after it is first started inside a tap: call this at the top of a tap handler, before any await.
@@ -1203,6 +1292,9 @@ function fillVoices() {
   };
   const en = synth ? synth.getVoices().filter(v => /^en[-_]/i.test(v.lang)) : [];
   const groups = [group("自然な声", NATURAL.map(([id, label]) => ["k:" + id, label]))];
+  const gv = store.get("gKey", "") ? gVoices() : [];
+  if (gv.length) groups.unshift(group("Google の声", gv.map(v => ["g:" + v.name,
+    `${v.name.split("-").pop()}（${v.lang === "en-US" ? "アメリカ" : "イギリス"}・${v.gender === "FEMALE" ? "女性" : v.gender === "MALE" ? "男性" : "—"}）`])));
   if (en.length) groups.push(group("端末の声", en.map(v => ["d:" + v.name, `${v.name} (${v.lang})`])));
   $("voice").replaceChildren(...groups);
   // A saved device voice that is not on this device: show the default natural voice instead.
@@ -1253,6 +1345,44 @@ syncThemeLabel();
   const st = showStreak();
   if (!st.doneToday && st.current) setStatus(`「スタート」を押すと始まります。今日練習すると${st.current + 1}日連続になります。`);
 }
+function gUi() {
+  const on = !!store.get("gKey", "");
+  $("gSetup").hidden = on; $("gConnected").hidden = !on;
+  if (on) $("gState").textContent = `使っています（${gVoices().length}種類の声）。「お手本の声」で選べます。`;
+  $("gState").className = "sync-state" + (on ? " ok" : "");
+}
+$("gConnectBtn").onclick = async () => {
+  const key = $("gKey").value.trim();
+  const state = (t, cls = "") => { $("gState").textContent = t; $("gState").className = "sync-state " + cls; };
+  if (!key) return state("キーを貼り付けてから「つなぐ」を押してください。", "bad");
+  state("確認中…");
+  const prev = store.get("gKey", "");
+  store.set("gKey", key);
+  try {
+    const voices = await gListVoices();
+    if (!voices.length) throw Object.assign(new Error("no voices"), { code: 0 });
+    // Also make one sentence, so a key limited to the wrong site is caught now rather than mid-practice.
+    await gCall("/text:synthesize", { input: { text: "Hello." }, voice: { languageCode: voices[0].lang, name: voices[0].name }, audioConfig: { audioEncoding: "MP3" } });
+    store.set("gVoices", JSON.stringify(voices));
+    g.failed = false;
+    $("gKey").value = "";
+    const pick = voices.find(v => /-Aoede$/.test(v.name) && v.lang === "en-US") || voices[0];
+    voiceName = "g:" + pick.name; store.set("voice", voiceName);
+    fillVoices(); gUi();
+  } catch (err) {
+    store.set("gKey", prev);
+    state(err.code === 403 ? `キーは受け付けられましたが使えません。API を有効にしたか、「ウェブサイト」の制限に https://elutely.github.io/* を入れたか確認してください。（${err.message}）`
+      : err.code === 400 ? `キーが正しくありません。コピーし直して貼り付けてください。（${err.message}）`
+      : `確認できませんでした。（${err.message}）`, "bad");
+  }
+};
+$("gOffBtn").onclick = () => {
+  store.set("gKey", ""); store.set("gVoices", "[]");
+  if (voiceName.startsWith("g:")) { voiceName = "k:af_heart"; store.set("voice", voiceName); }
+  fillVoices(); gUi();
+  $("gState").textContent = "この端末では使うのをやめました。Google 側のキーは、コンソールで削除できます。";
+};
+gUi();
 $("syncConnectBtn").onclick = () => {
   const tok = $("syncToken").value.trim();
   if (!tok) { syncState("合言葉を貼り付けてから「つなぐ」を押してください。", "bad"); return; }
