@@ -199,6 +199,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <select id="voice"></select>
     <button id="previewBtn" type="button">試聴</button>
     <p class="tts-note" id="ttsNote" hidden></p>
+    <p class="tts-note" id="gUsage" hidden></p>
   </div>
 
   <div class="controls">
@@ -269,6 +270,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
           <button id="gOffBtn" type="button">この端末で使うのをやめる</button>
         </div>
         <p class="sync-state" id="gState">使っていません。キーはこの端末の中だけに保存され、同期もされません。</p>
+        <p class="sync-state" id="gUsageFull" hidden></p>
       </section>
       <section class="sync" aria-labelledby="syncTitle">
         <h3 id="syncTitle">スマホと PC の同期（GitHub）</h3>
@@ -557,6 +559,39 @@ async function gListVoices() {
     .sort((a, b) => a.lang === b.lang ? a.name.localeCompare(b.name) : a.lang === "en-US" ? -1 : 1);
 }
 // A rejected key or a used-up quota stops Google for this visit; a dropped connection only skips that sentence.
+// ---- Usage of the Google voice this month, counted by the app (Google's own figures need a sign-in it does not have) ----
+// gUsage: { "YYYY-MM": { <device id>: characters } }. Per device, so PC and phone add up through the sync.
+// The month follows Google's billing, which runs on Pacific time.
+const G_FREE_CHARS = 1000000;
+const deviceId = store.get("deviceId", "") || (() => { const id = newId(); store.set("deviceId", id); return id; })();
+function billingMonth(d = new Date()) {
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit" }).format(d).slice(0, 7); }
+  catch { return d.toISOString().slice(0, 7); }
+}
+function gUsage() { try { return JSON.parse(store.get("gUsage", "{}")) || {}; } catch { return {}; } }
+function gCount(chars) {
+  const u = gUsage(), m = billingMonth();
+  u[m] = u[m] || {};
+  u[m][deviceId] = (u[m][deviceId] || 0) + chars;
+  store.set("gUsage", JSON.stringify(u));
+  showUsage();
+  syncSoon();
+}
+function showUsage() {
+  const on = !!store.get("gKey", "");
+  const used = Object.values(gUsage()[billingMonth()] || {}).reduce((a, b) => a + b, 0);
+  const list = items.length ? items : parseList(SAMPLE);
+  const perSentence = Math.max(10, Math.round(list.reduce((n, x) => n + x.en.length, 0) / list.length));
+  const left = G_FREE_CHARS - used;
+  const short = left > 0
+    ? `Google の声：今月 ${used.toLocaleString()} / ${G_FREE_CHARS.toLocaleString()} 文字（無料であと 約${Math.floor(left / perSentence).toLocaleString()}文）`
+    : `Google の声：今月 ${used.toLocaleString()} 文字。無料枠を超えています（超えた分 約${(-left * 0.00003).toFixed(2)}ドル）`;
+  $("gUsage").textContent = short;
+  $("gUsage").hidden = !(on && voiceName.startsWith("g:"));
+  $("gUsageFull").replaceChildren(short + "。このアプリで新しく作った分だけを数えています（保存済みの文の読み直しは無料なので数えません。同期していない端末やほかのアプリで使った分は入りません）。正確な数字は ",
+    Object.assign(document.createElement("a"), { href: "https://console.cloud.google.com/billing", target: "_blank", rel: "noopener", textContent: "Google Cloud の「お支払い」→「レポート」" }), " で確認できます。");
+  $("gUsageFull").hidden = !on;
+}
 function gFailed(err) {
   if (g.failed || ![400, 403, 429].includes(err.code)) return;
   g.failed = true;
@@ -583,6 +618,7 @@ function gPump() {
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         const blob = new Blob([bytes], { type: "audio/mpeg" });
+        gCount(text.length);
         const url = URL.createObjectURL(blob);
         tts.urls.set(key, url);
         cachePut(key, blob);
@@ -937,7 +973,7 @@ async function gh(path, opts = {}) {
   return res.json();
 }
 function localData() {
-  return { days: practiceDays(), sets: readSets() };
+  return { days: practiceDays(), sets: readSets(), usage: gUsage() };
 }
 // Pure merge of two copies: union of days, newer list wins.
 function mergeSync(a, b) {
@@ -949,7 +985,14 @@ function mergeSync(a, b) {
     if (!have || (x.at || 0) > (have.at || 0)) byId.set(x.id, x);
   });
   const sets = [...byId.values()].sort((x, y) => (x.created || 0) - (y.created || 0));
-  return { days, sets };
+  // Google voice usage: each device only adds to its own count, so the larger number is the newer one.
+  const usage = {};
+  [a.usage || {}, b.usage || {}].forEach(u => Object.entries(u).forEach(([m, devs]) => {
+    usage[m] = usage[m] || {};
+    Object.entries(devs || {}).forEach(([d, n]) => { usage[m][d] = Math.max(usage[m][d] || 0, n); });
+  }));
+  Object.keys(usage).sort().slice(0, -3).forEach(m => delete usage[m]); // keep the last 3 months
+  return { days, sets, usage };
 }
 async function findGist() {
   let id = store.get("gistId", "");
@@ -983,6 +1026,7 @@ async function syncNow() {
     const local = localData();
     const merged = mergeSync(local, remote);
     if (JSON.stringify(merged.days) !== JSON.stringify(local.days)) { store.set("days", JSON.stringify(merged.days)); showStreak(); }
+    if (JSON.stringify(merged.usage) !== JSON.stringify(local.usage)) { store.set("gUsage", JSON.stringify(merged.usage)); showUsage(); }
     if (JSON.stringify(merged.sets) !== JSON.stringify(local.sets)) {
       writeSets(merged.sets);
       if (!running) { renderSets(); loadList(); }
@@ -1300,7 +1344,7 @@ function fillVoices() {
   // A saved device voice that is not on this device: show the default natural voice instead.
   if ($("voice").value !== voiceName && !(voiceName.startsWith("d:") && !en.length)) $("voice").value = voiceName;
 }
-$("voice").onchange = e => { voiceName = e.target.value; store.set("voice", voiceName); preview(); };
+$("voice").onchange = e => { voiceName = e.target.value; store.set("voice", voiceName); showUsage(); preview(); };
 // Plays a sample with the chosen voice (only while not practicing, so it never overlaps the model).
 function preview() {
   if (running) return;
@@ -1364,11 +1408,12 @@ $("gConnectBtn").onclick = async () => {
     // Also make one sentence, so a key limited to the wrong site is caught now rather than mid-practice.
     await gCall("/text:synthesize", { input: { text: "Hello." }, voice: { languageCode: voices[0].lang, name: voices[0].name }, audioConfig: { audioEncoding: "MP3" } });
     store.set("gVoices", JSON.stringify(voices));
+    gCount("Hello.".length);
     g.failed = false;
     $("gKey").value = "";
     const pick = voices.find(v => /-Aoede$/.test(v.name) && v.lang === "en-US") || voices[0];
     voiceName = "g:" + pick.name; store.set("voice", voiceName);
-    fillVoices(); gUi();
+    fillVoices(); gUi(); showUsage();
   } catch (err) {
     store.set("gKey", prev);
     state(err.code === 403 ? `キーは受け付けられましたが使えません。API を有効にしたか、「ウェブサイト」の制限に https://elutely.github.io/* を入れたか確認してください。（${err.message}）`
@@ -1379,10 +1424,11 @@ $("gConnectBtn").onclick = async () => {
 $("gOffBtn").onclick = () => {
   store.set("gKey", ""); store.set("gVoices", "[]");
   if (voiceName.startsWith("g:")) { voiceName = "k:af_heart"; store.set("voice", voiceName); }
-  fillVoices(); gUi();
+  fillVoices(); gUi(); showUsage();
   $("gState").textContent = "この端末では使うのをやめました。Google 側のキーは、コンソールで削除できます。";
 };
 gUi();
+showUsage();
 $("syncConnectBtn").onclick = () => {
   const tok = $("syncToken").value.trim();
   if (!tok) { syncState("合言葉を貼り付けてから「つなぐ」を押してください。", "bad"); return; }
