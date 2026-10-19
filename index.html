@@ -238,9 +238,6 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
         <label><input type="checkbox" id="tts"> お手本を読み上げてからリピート</label>
       </div>
       <div class="row">
-        <label><input type="checkbox" id="keepMic"> 練習中はマイクを入れたままにする（iPhone で、文ごとにマイクの通知が出るのを減らします）</label>
-      </div>
-      <div class="row">
         <label><input type="checkbox" id="cue"> 話し始めていいタイミングで合図の音を鳴らす</label>
       </div>
       <div class="row">
@@ -393,12 +390,6 @@ let rec = null, gen = 0, restarts = 0, completing = false, cued = false;
 // The mic is started a little before the model voice ends, to hide its start-up delay.
 // recState: "off" | "starting" | "live". preText: what it heard of the model voice, per result, to strip later.
 let recState = "off", preText = [];
-// Keep-mic mode: one recognizer for the whole practice instead of one per sentence. iPhone shows a
-// "microphone allowed" banner every time the mic starts, so there it is on by default.
-// base: first result index that belongs to the current sentence; lastLen: results seen so far in this session.
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-let keepMic = store.get("keepMic", isIOS ? "1" : "0") === "1";
-let base = 0, lastLen = 0;
 const MIC_LEAD_MS = 700;
 let cueOn = store.get("cue", "1") === "1";
 let silenceTimer = null, giveUpTimer = null, audio = null, wakeLock = null;
@@ -841,18 +832,15 @@ function ping() {
 
 function startRec() {
   stopRec();
-  if (!speaking || keepMic) preText = []; // a fresh session has fresh result indexes
-  base = 0; lastLen = 0;
+  if (!speaking) preText = []; // a fresh session has fresh result indexes
   const my = ++gen;
   const r = new Rec();
   r.lang = "en-US"; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
   r.onresult = e => {
-    if (my !== gen) return;
-    lastLen = e.results.length;
-    if (judged) return;
+    if (my !== gen || judged) return;
     if (speaking) {
       // Still the model voice: remember it so it is not counted as the learner's speech.
-      for (let i = base; i < e.results.length; i++) preText[i] = e.results[i][0].transcript;
+      for (let i = 0; i < e.results.length; i++) preText[i] = e.results[i][0].transcript;
       return;
     }
     restarts = 0;
@@ -864,7 +852,7 @@ function startRec() {
       return t.trim().split(/\s+/).slice(pre.trim().split(/\s+/).length).join(" ");
     };
     let finalText = "", interim = [];
-    for (let i = base; i < e.results.length; i++) {
+    for (let i = 0; i < e.results.length; i++) {
       const res = e.results[i];
       if (res.isFinal) finalText += " " + own(i, res[0].transcript);
       else interim = [...res].map(a => own(i, a.transcript));
@@ -910,20 +898,15 @@ function startRec() {
   r.onend = () => {
     if (my !== gen) return;
     recState = "off";
-    if (!running || (!keepMic && (judged || speaking))) return;
+    if (!running || judged || speaking) return;
     if (++restarts > 8) { stop(); showError("音声認識が何度も止まりました。「再開」を押してください。"); return; }
-    setTimeout(() => { if (my === gen && running && (keepMic || (!judged && !speaking))) startRec(); }, 250);
+    setTimeout(() => { if (my === gen && running && !judged && !speaking) startRec(); }, 250);
   };
   rec = r;
   recState = "starting";
   try { r.start(); } catch { setTimeout(() => { if (my === gen && running) startRec(); }, 300); }
 }
 function stopRec() { gen++; recState = "off"; if (rec) { const r = rec; rec = null; try { r.abort(); } catch {} } }
-// Between sentences: in keep-mic mode the recognizer keeps running and what it heard so far is set aside.
-function releaseRec() {
-  if (keepMic && running && rec) { base = lastLen; preText = []; }
-  else stopRec();
-}
 function armGiveUp() {
   clearTimeout(giveUpTimer);
   giveUpTimer = setTimeout(() => { if (running && !judged) judge(); }, GIVE_UP_SEC * 1000);
@@ -1070,7 +1053,7 @@ function judge() {
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
   judged = true;
   endModel();
-  releaseRec();
+  stopRec();
   $("replayBtn").disabled = true;
   const ok = hits.every(Boolean);
   paint(true);
@@ -1232,14 +1215,14 @@ function playModel() {
   if (!running || judged) return;
   const my = ++modelGen;
   speaking = true;
-  releaseRec();
+  stopRec();
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
   setStatus("お手本を再生中…");
   preText = [];
   say(items[order[pos]].en,
     () => { if (my === modelGen && running && !judged) listen(); },
     null,
-    () => { if (my === modelGen && running && !judged && speaking && !(keepMic && rec)) startRec(); });
+    () => { if (my === modelGen && running && !judged && speaking) startRec(); });
 }
 function endModel() {
   modelGen++;
@@ -1338,8 +1321,6 @@ $("skipBtn").onclick = skip;
 $("replayBtn").onclick = replay;
 $("cue").checked = cueOn;
 $("cue").onchange = e => { cueOn = e.target.checked; store.set("cue", cueOn ? "1" : "0"); };
-$("keepMic").checked = keepMic;
-$("keepMic").onchange = e => { keepMic = e.target.checked; store.set("keepMic", keepMic ? "1" : "0"); };
 $("tts").checked = ttsOn;
 $("tts").onchange = e => { ttsOn = e.target.checked; store.set("tts", ttsOn ? "1" : "0"); syncVoiceBar(); };
 $("rate").value = rate; $("rateVal").textContent = rate;
