@@ -85,7 +85,9 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .card.ok { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .card { touch-action: pan-y; user-select: none; -webkit-user-select: none; transition: transform .18s ease, opacity .18s ease; }
 .card.dragging { transition: none; cursor: grabbing; }
-.swipe-hint { font-size: 12px; color: var(--muted); margin: -10px 0 0; text-align: center; }
+.nav { display: flex; align-items: center; gap: 10px; margin-top: -6px; }
+.nav button { padding: 8px 14px; font-size: 14px; flex: none; }
+.swipe-hint { flex: 1; font-size: 12px; color: var(--muted); margin: 0; text-align: center; }
 .heard { font-size: 13px; color: var(--pending); min-height: 1.4em; margin: 0; overflow-wrap: anywhere; }
 .status { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--pending); min-height: 24px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
@@ -187,7 +189,11 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <p class="sentence" id="sentence"></p>
       <p class="heard" id="heard"></p>
     </section>
-    <p class="swipe-hint" id="swipeHint">左右にスワイプで前後の文へ（PC はドラッグか ← → キー）</p>
+    <div class="nav" id="nav">
+      <button id="prevBtn" type="button" aria-label="前の文">‹ 前へ</button>
+      <p class="swipe-hint">スワイプでも移動できます</p>
+      <button id="nextBtn" type="button" aria-label="次の文">次へ ›</button>
+    </div>
     <div class="status" id="status"><span class="dot"></span><span id="statusText">「スタート」を押すと、表示された英文を聞き取り始めます。</span></div>
     <p class="error" id="error" hidden></p>
     <section class="results" id="results" hidden></section>
@@ -783,7 +789,7 @@ function show() {
   $("count").textContent = `${Math.min(pos + 1, order.length)} / ${order.length}`;
   $("bar").style.width = (order.length ? pos / order.length * 100 : 0) + "%";
   $("card").classList.remove("ok");
-  $("card").hidden = false; $("swipeHint").hidden = false;
+  $("card").hidden = false; $("nav").hidden = false; syncNav();
   $("heard").textContent = "";
   if (!item) { $("sentence").textContent = ""; $("ja").textContent = ""; return; }
   $("ja").textContent = item.ja;
@@ -1243,6 +1249,7 @@ function canGo(dir) {
   const to = pos + dir;
   return to >= 0 && (to < order.length || (running && dir > 0));
 }
+function syncNav() { $("prevBtn").disabled = !canGo(-1); $("nextBtn").disabled = !canGo(1); }
 function go(dir) {
   if (!canGo(dir)) return;
   if (running) {
@@ -1296,6 +1303,8 @@ function go(dir) {
   card.addEventListener("pointerup", end);
   card.addEventListener("pointercancel", end);
 }
+$("prevBtn").onclick = () => go(-1);
+$("nextBtn").onclick = () => go(1);
 document.addEventListener("keydown", e => {
   if (e.altKey || e.ctrlKey || e.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   if (e.key === "ArrowRight") { e.preventDefault(); go(1); }
@@ -1318,6 +1327,7 @@ async function start() {
 function stop() {
   running = false;
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer); clearTimeout(nextTimer);
+  syncNav();
   endModel();
   stopRec();
   try { wakeLock?.release(); } catch {}
@@ -1336,7 +1346,7 @@ function finish() {
   const score = wordTotal ? Math.round(wordHit / wordTotal * 100) : 0;
   setStatus(`終了。${score}点でした。`);
   $("sentence").textContent = ""; $("ja").textContent = ""; $("heard").textContent = "";
-  $("card").hidden = true; $("swipeHint").hidden = true;
+  $("card").hidden = true; $("nav").hidden = true;
   const box = $("results");
   const card = document.createElement("div"); card.className = "score";
   const num = document.createElement("div"); num.className = "score-num";
