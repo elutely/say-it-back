@@ -85,9 +85,12 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .card.ok { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .card { touch-action: pan-y; user-select: none; -webkit-user-select: none; transition: transform .18s ease, opacity .18s ease; }
 .card.dragging { transition: none; cursor: grabbing; }
-.nav { display: flex; align-items: center; gap: 10px; margin-top: -6px; }
-.nav button { padding: 8px 14px; font-size: 14px; flex: none; }
-.swipe-hint { flex: 1; font-size: 12px; color: var(--muted); margin: 0; text-align: center; }
+.card { position: relative; }
+/* Tap the left / right edge of the card to move; the arrows show where it can go. */
+.edge { position: absolute; top: 50%; transform: translateY(-50%); font-size: 26px; line-height: 1; color: var(--muted); pointer-events: none; transition: opacity .15s; }
+.edge.prev { left: 8px; } .edge.next { right: 8px; }
+.edge.off { opacity: 0; }
+.swipe-hint { font-size: 12px; color: var(--muted); margin: -10px 0 0; text-align: center; }
 .heard { font-size: 13px; color: var(--pending); min-height: 1.4em; margin: 0; overflow-wrap: anywhere; }
 .status { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--pending); min-height: 24px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
@@ -188,12 +191,10 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <p class="ja" id="ja"></p>
       <p class="sentence" id="sentence"></p>
       <p class="heard" id="heard"></p>
+      <span class="edge prev" id="edgePrev" aria-hidden="true">‹</span>
+      <span class="edge next" id="edgeNext" aria-hidden="true">›</span>
     </section>
-    <div class="nav" id="nav">
-      <button id="prevBtn" type="button" aria-label="前の文">‹ 前へ</button>
-      <p class="swipe-hint">スワイプでも移動できます</p>
-      <button id="nextBtn" type="button" aria-label="次の文">次へ ›</button>
-    </div>
+    <p class="swipe-hint" id="nav">カードの左右の端をタップするか、スワイプで前後の文へ</p>
     <div class="status" id="status"><span class="dot"></span><span id="statusText">「スタート」を押すと、表示された英文を聞き取り始めます。</span></div>
     <p class="error" id="error" hidden></p>
     <section class="results" id="results" hidden></section>
@@ -1249,7 +1250,7 @@ function canGo(dir) {
   const to = pos + dir;
   return to >= 0 && (to < order.length || (running && dir > 0));
 }
-function syncNav() { $("prevBtn").disabled = !canGo(-1); $("nextBtn").disabled = !canGo(1); }
+function syncNav() { $("edgePrev").classList.toggle("off", !canGo(-1)); $("edgeNext").classList.toggle("off", !canGo(1)); }
 function go(dir) {
   if (!canGo(dir)) return;
   if (running) {
@@ -1288,9 +1289,14 @@ function go(dir) {
   });
   const end = () => {
     if (!drag) return;
-    const { on, dx } = drag;
+    const { on, dx, x } = drag;
     drag = null;
-    if (!on) return;
+    if (!on) {
+      // A tap: the outer quarter on each side moves back / forward.
+      const r = card.getBoundingClientRect(), edge = Math.max(56, r.width / 4);
+      if (x < r.left + edge) go(-1); else if (x > r.right - edge) go(1);
+      return;
+    }
     card.classList.remove("dragging");
     const dir = dx < 0 ? 1 : -1;
     if (Math.abs(dx) < 70 || !canGo(dir)) return settle(0);
@@ -1301,10 +1307,8 @@ function go(dir) {
     requestAnimationFrame(() => requestAnimationFrame(() => { card.classList.remove("dragging"); settle(0); }));
   };
   card.addEventListener("pointerup", end);
-  card.addEventListener("pointercancel", end);
+  card.addEventListener("pointercancel", () => { if (drag && !drag.on) drag = null; end(); }); // the browser took it (e.g. a scroll): not a tap
 }
-$("prevBtn").onclick = () => go(-1);
-$("nextBtn").onclick = () => go(1);
 document.addEventListener("keydown", e => {
   if (e.altKey || e.ctrlKey || e.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   if (e.key === "ArrowRight") { e.preventDefault(); go(1); }
