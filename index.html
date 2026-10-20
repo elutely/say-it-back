@@ -83,6 +83,9 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .w.hit { color: var(--ink); border-bottom-color: var(--accent); }
 .w.miss { color: var(--muted); }
 .card.ok { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.card { touch-action: pan-y; user-select: none; -webkit-user-select: none; transition: transform .18s ease, opacity .18s ease; }
+.card.dragging { transition: none; cursor: grabbing; }
+.swipe-hint { font-size: 12px; color: var(--muted); margin: -10px 0 0; text-align: center; }
 .heard { font-size: 13px; color: var(--pending); min-height: 1.4em; margin: 0; overflow-wrap: anywhere; }
 .status { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--pending); min-height: 24px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
@@ -184,6 +187,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <p class="sentence" id="sentence"></p>
       <p class="heard" id="heard"></p>
     </section>
+    <p class="swipe-hint" id="swipeHint">左右にスワイプで前後の文へ（PC はドラッグか ← → キー）</p>
     <div class="status" id="status"><span class="dot"></span><span id="statusText">「スタート」を押すと、表示された英文を聞き取り始めます。</span></div>
     <p class="error" id="error" hidden></p>
     <section class="results" id="results" hidden></section>
@@ -205,7 +209,6 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
   <div class="controls">
     <button class="primary" id="startBtn" type="button">スタート</button>
     <button id="replayBtn" type="button" disabled>もう一度聞く</button>
-    <button id="skipBtn" type="button" disabled>スキップ</button>
     <button id="retryBtn" type="button" hidden>言えなかった文だけもう一度</button>
     <button id="homeBtn" type="button" hidden>最初の画面に戻る</button>
   </div>
@@ -384,7 +387,7 @@ const store = {
 };
 const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-let items = [], order = [], pos = 0, results = [];
+let items = [], order = [], pos = 0, results = [], nextTimer = null;
 let hits = [], words = [], running = false, judged = false, speaking = false, modelGen = 0;
 let rec = null, gen = 0, restarts = 0, completing = false, cued = false;
 // The mic is started a little before the model voice ends, to hide its start-up delay.
@@ -780,7 +783,7 @@ function show() {
   $("count").textContent = `${Math.min(pos + 1, order.length)} / ${order.length}`;
   $("bar").style.width = (order.length ? pos / order.length * 100 : 0) + "%";
   $("card").classList.remove("ok");
-  $("card").hidden = false;
+  $("card").hidden = false; $("swipeHint").hidden = false;
   $("heard").textContent = "";
   if (!item) { $("sentence").textContent = ""; $("ja").textContent = ""; return; }
   $("ja").textContent = item.ja;
@@ -1057,11 +1060,11 @@ function judge() {
   $("replayBtn").disabled = true;
   const ok = hits.every(Boolean);
   paint(true);
-  results.push({ idx: order[pos], ok, hits: hits.slice() });
+  results[pos] = { idx: order[pos], ok, hits: hits.slice() }; // by position: going back and redoing replaces it
   if (hits.some(Boolean)) recordPractice(); // a skipped or silent sentence does not count
   if (ok) { ping(); $("card").classList.add("ok"); setStatus("正解！"); }
   else setStatus(`${hits.filter(Boolean).length} / ${hits.length} 語。グレーの部分が言えていません。`);
-  setTimeout(next, ok ? 600 : 1600);
+  nextTimer = setTimeout(next, ok ? 600 : 1600);
 }
 function next() {
   if (!running) return;
@@ -1233,11 +1236,71 @@ function replay() {
   if (!running || judged) return;
   playModel();
 }
-function skip() {
-  if (!running || judged) return;
-  hits = hits.map(() => false);
-  judge();
+// Move to the previous (-1) or next (+1) sentence. While practicing, a sentence left without an answer
+// counts as not said (like the old "skip"); before starting or while paused it only changes the shown sentence.
+function canGo(dir) {
+  if (!$("results").hidden || !order.length) return false;
+  const to = pos + dir;
+  return to >= 0 && (to < order.length || (running && dir > 0));
 }
+function go(dir) {
+  if (!canGo(dir)) return;
+  if (running) {
+    clearTimeout(nextTimer); clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
+    if (dir > 0 && !results[pos]) results[pos] = { idx: order[pos], ok: false, hits: words.map(() => false) };
+    endModel();
+    stopRec();
+    pos += dir;
+    if (pos >= order.length) return finish();
+    show();
+    begin();
+  } else {
+    pos += dir;
+    show();
+  }
+}
+// Swipe (or drag with a mouse) the card: left = next sentence, right = previous.
+{
+  const card = $("card");
+  let drag = null;
+  const settle = (dx) => { card.style.transform = dx ? `translateX(${dx}px)` : ""; card.style.opacity = dx ? String(Math.max(0.3, 1 - Math.abs(dx) / 400)) : ""; };
+  card.addEventListener("pointerdown", e => { if (e.button === 0) drag = { x: e.clientX, y: e.clientY, id: e.pointerId, on: false, dx: 0 }; });
+  card.addEventListener("pointermove", e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.on) {
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; } // a vertical scroll
+      if (Math.abs(dx) < 12) return;
+      drag.on = true;
+      try { card.setPointerCapture(drag.id); } catch {}
+      card.classList.add("dragging");
+    }
+    // Resist at the ends, where there is nothing to move to.
+    drag.dx = canGo(dx < 0 ? 1 : -1) ? dx : dx / 4;
+    settle(drag.dx);
+  });
+  const end = () => {
+    if (!drag) return;
+    const { on, dx } = drag;
+    drag = null;
+    if (!on) return;
+    card.classList.remove("dragging");
+    const dir = dx < 0 ? 1 : -1;
+    if (Math.abs(dx) < 70 || !canGo(dir)) return settle(0);
+    // Switch now (so a timer cannot move it a second time), then slide the new sentence in from the other side.
+    go(dir);
+    card.classList.add("dragging");
+    settle(dir * card.offsetWidth * 0.6);
+    requestAnimationFrame(() => requestAnimationFrame(() => { card.classList.remove("dragging"); settle(0); }));
+  };
+  card.addEventListener("pointerup", end);
+  card.addEventListener("pointercancel", end);
+}
+document.addEventListener("keydown", e => {
+  if (e.altKey || e.ctrlKey || e.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (e.key === "ArrowRight") { e.preventDefault(); go(1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
+});
 
 async function start() {
   $("error").hidden = true;
@@ -1247,38 +1310,39 @@ async function start() {
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   if (pos >= order.length || !$("results").hidden) loadList();
   running = true;
-  $("startBtn").textContent = "一時停止"; $("skipBtn").disabled = false; $("previewBtn").disabled = true; $("setSelect").disabled = true;
+  $("startBtn").textContent = "一時停止"; $("previewBtn").disabled = true; $("setSelect").disabled = true;
   $("settingsBox").open = false;
   show();
   begin();
 }
 function stop() {
   running = false;
-  clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
+  clearTimeout(silenceTimer); clearTimeout(giveUpTimer); clearTimeout(nextTimer);
   endModel();
   stopRec();
   try { wakeLock?.release(); } catch {}
-  $("startBtn").textContent = "再開"; $("skipBtn").disabled = true; $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setSelect").disabled = false;
+  $("startBtn").textContent = "再開"; $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setSelect").disabled = false;
   setStatus("一時停止中。再開すると今の文からやり直します。");
 }
 function finish() {
   stop();
   $("startBtn").textContent = "最初からもう一度";
   $("bar").style.width = "100%";
-  const okCount = results.filter(r => r.ok).length;
-  const wordTotal = results.reduce((n, r) => n + r.hits.length, 0);
-  const wordHit = results.reduce((n, r) => n + r.hits.filter(Boolean).length, 0);
+  const done = results.filter(Boolean);
+  const okCount = done.filter(r => r.ok).length;
+  const wordTotal = done.reduce((n, r) => n + r.hits.length, 0);
+  const wordHit = done.reduce((n, r) => n + r.hits.filter(Boolean).length, 0);
   // Score = share of words said, out of 100 (skipped sentences count as 0).
   const score = wordTotal ? Math.round(wordHit / wordTotal * 100) : 0;
   setStatus(`終了。${score}点でした。`);
   $("sentence").textContent = ""; $("ja").textContent = ""; $("heard").textContent = "";
-  $("card").hidden = true;
+  $("card").hidden = true; $("swipeHint").hidden = true;
   const box = $("results");
   const card = document.createElement("div"); card.className = "score";
   const num = document.createElement("div"); num.className = "score-num";
   num.append(String(score)); const unit = document.createElement("small"); unit.textContent = "点"; num.append(unit);
   const detail = document.createElement("div"); detail.className = "score-detail";
-  [["文", okCount, results.length, "文を全部言えた"], ["単語", wordHit, wordTotal, "語を言えた"]].forEach(([, a, b, label]) => {
+  [["文", okCount, done.length, "文を全部言えた"], ["単語", wordHit, wordTotal, "語を言えた"]].forEach(([, a, b, label]) => {
     const line = document.createElement("span");
     const st = document.createElement("strong"); st.textContent = `${a} / ${b}`;
     line.append(st, " " + label); detail.append(line);
@@ -1291,7 +1355,7 @@ function finish() {
   }
   card.append(num, detail);
   const h = document.createElement("h2"); h.textContent = "文ごとの結果";
-  box.replaceChildren(card, h, ...results.map(r => {
+  box.replaceChildren(card, h, ...done.map(r => {
     const row = document.createElement("div"); row.className = "res";
     const b = document.createElement("b"); b.className = r.ok ? "ok" : "ng"; b.textContent = r.ok ? "OK" : "もう一度";
     const span = document.createElement("span");
@@ -1303,7 +1367,7 @@ function finish() {
     row.append(b, span); return row;
   }));
   box.hidden = false;
-  $("retryBtn").hidden = okCount === results.length;
+  $("retryBtn").hidden = okCount === done.length;
   $("homeBtn").hidden = false;
 }
 // Back to the start screen without reloading: first sentence of the chosen set, ready to start.
@@ -1317,7 +1381,6 @@ function goHome() {
 function showError(msg) { $("error").textContent = msg; $("error").hidden = false; }
 
 $("startBtn").onclick = () => running ? stop() : start();
-$("skipBtn").onclick = skip;
 $("replayBtn").onclick = replay;
 $("cue").checked = cueOn;
 $("cue").onchange = e => { cueOn = e.target.checked; store.set("cue", cueOn ? "1" : "0"); };
@@ -1357,7 +1420,7 @@ fillVoices();
 synth?.addEventListener?.("voiceschanged", fillVoices);
 syncVoiceBar();
 $("retryBtn").onclick = () => {
-  const missed = results.filter(r => !r.ok).map(r => r.idx);
+  const missed = results.filter(r => r && !r.ok).map(r => r.idx);
   loadList(missed);
   start();
 };
