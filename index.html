@@ -291,6 +291,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
         </div>
         <p class="sync-state" id="syncState">同期していません。記録と英文リストはこのブラウザの中だけに保存されています。</p>
       </section>
+      <p class="hint" id="audioDiag" hidden></p>
       <p class="hint">PC の Chrome 向けに作っています。Safari（iPhone）も音声認識に対応していますが、途中で聞き取りが止まることがあります。Firefox は非対応。音声認識はブラウザの機能を使うため、オンラインで使ってください。ファイルを直接開くと、文ごとにマイクの許可を聞かれます。URL（https か localhost）で開くと許可が記憶されます。</p>
     </div>
   </details>
@@ -390,6 +391,15 @@ let rec = null, gen = 0, restarts = 0, completing = false, cued = false;
 // The mic is started a little before the model voice ends, to hide its start-up delay.
 // recState: "off" | "starting" | "live". preText: what it heard of the model voice, per result, to strip later.
 let recState = "off", preText = [];
+// iPhone: once the mic has been used, the page's sound goes to the speaker even with earphones in.
+// So there the mic starts only after the model voice ends, and the audio session is switched between
+// "playback" (model voice) and "play-and-record" (listening) where the browser supports it.
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const hasAudioSession = !!(navigator.audioSession && "type" in navigator.audioSession);
+function audioMode(type) {
+  if (!isIOS || !hasAudioSession) return;
+  try { if (navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch {}
+}
 const MIC_LEAD_MS = 700;
 let cueOn = store.get("cue", "1") === "1";
 let silenceTimer = null, giveUpTimer = null, audio = null, wakeLock = null;
@@ -904,6 +914,7 @@ function startRec() {
   };
   rec = r;
   recState = "starting";
+  audioMode("play-and-record");
   try { r.start(); } catch { setTimeout(() => { if (my === gen && running) startRec(); }, 300); }
 }
 function stopRec() { gen++; recState = "off"; if (rec) { const r = rec; rec = null; try { r.abort(); } catch {} } }
@@ -1054,6 +1065,7 @@ function judge() {
   judged = true;
   endModel();
   stopRec();
+  audioMode("playback");
   $("replayBtn").disabled = true;
   const ok = hits.every(Boolean);
   paint(true);
@@ -1216,13 +1228,14 @@ function playModel() {
   const my = ++modelGen;
   speaking = true;
   stopRec();
+  audioMode("playback");
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
   setStatus("お手本を再生中…");
   preText = [];
   say(items[order[pos]].en,
     () => { if (my === modelGen && running && !judged) listen(); },
     null,
-    () => { if (my === modelGen && running && !judged && speaking) startRec(); });
+    isIOS ? null : () => { if (my === modelGen && running && !judged && speaking) startRec(); });
 }
 function endModel() {
   modelGen++;
@@ -1257,6 +1270,7 @@ function stop() {
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
   endModel();
   stopRec();
+  audioMode("auto");
   try { wakeLock?.release(); } catch {}
   $("startBtn").textContent = "再開"; $("skipBtn").disabled = true; $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setSelect").disabled = false;
   setStatus("一時停止中。再開すると今の文からやり直します。");
@@ -1321,6 +1335,10 @@ $("skipBtn").onclick = skip;
 $("replayBtn").onclick = replay;
 $("cue").checked = cueOn;
 $("cue").onchange = e => { cueOn = e.target.checked; store.set("cue", cueOn ? "1" : "0"); };
+if (isIOS) {
+  $("audioDiag").hidden = false;
+  $("audioDiag").textContent = "iPhone のイヤホン対策：マイクはお手本が鳴り終わってから入れます。音の出し先の切り替え（audioSession）は、このブラウザでは" + (hasAudioSession ? "使えます。" : "使えません。");
+}
 $("tts").checked = ttsOn;
 $("tts").onchange = e => { ttsOn = e.target.checked; store.set("tts", ttsOn ? "1" : "0"); syncVoiceBar(); };
 $("rate").value = rate; $("rateVal").textContent = rate;
