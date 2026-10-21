@@ -81,8 +81,6 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 }
 .w { color: var(--pending); transition: color .15s; border-bottom: 3px solid transparent; }
 .w.hit { color: var(--ink); border-bottom-color: var(--accent); }
-/* While the model voice reads the sentence, the line runs under the words as they are read. */
-.w.say, .w.hide.say { border-bottom-color: var(--accent); }
 .w.miss { color: var(--muted); }
 /* A hidden word keeps its place (and length) but not its letters, until it is said or the sentence is judged. */
 .w.hide { color: transparent; background: var(--line); border-radius: 6px; border-bottom-color: transparent; }
@@ -1254,30 +1252,8 @@ function soundFailed(why) { dlog(why); $("soundHint").hidden = false; }
 function stopSay() {
   sayGen++;
   clearTimeout(sayTimer); clearTimeout(noStartTimer); clearTimeout(nearTimer);
-  sweepClear();
   players.forEach(el => { try { el.pause(); } catch {} });
   try { if (synth && (synth.speaking || synth.pending)) { synth.cancel(); cancelledAt = performance.now(); } } catch {}
-}
-// ---- The line under the words being read by the model voice ----
-// progress() returns how far the reading is (0-1, by characters), or null when unknown.
-let sweepRaf = 0;
-function sweepStart(text, my, progress) {
-  cancelAnimationFrame(sweepRaf);
-  if (items[order[pos]]?.en !== text || !words.length) return;
-  const starts = []; let at = 0;
-  words.forEach(w => { starts.push(at); at += w.length + 1; });
-  const els = [...$("sentence").children];
-  const tick = () => {
-    if (my !== sayGen) return sweepClear();
-    const f = progress();
-    if (f !== null && isFinite(f)) els.forEach((el, i) => el.classList.toggle("say", starts[i] <= f * at));
-    sweepRaf = requestAnimationFrame(tick);
-  };
-  tick();
-}
-function sweepClear() {
-  cancelAnimationFrame(sweepRaf);
-  [...$("sentence").children].forEach(el => el.classList.remove("say"));
 }
 // Reads text aloud with the chosen voice: pre-made natural audio if there is one, otherwise the device voice.
 // done() runs once when playback ends or fails; onStart() when sound begins.
@@ -1290,7 +1266,6 @@ function say(text, done, onStart, onNearEnd) {
     if (finished || my !== sayGen) return;
     finished = true;
     clearTimeout(sayTimer); clearTimeout(noStartTimer);
-    sweepClear();
     done && done();
   };
   const fallback = why => {
@@ -1305,10 +1280,10 @@ function say(text, done, onStart, onNearEnd) {
   naturalSource(text).then(url => {
     if (my !== sayGen) return;
     if (!url) return sayDevice(text, my, finish, onStart);
-    playUrl(url, text, my, finish, fallback, onStart, onNearEnd);
+    playUrl(url, my, finish, fallback, onStart, onNearEnd);
   }).catch(() => { if (my === sayGen) sayDevice(text, my, finish, onStart); });
 }
-function playUrl(url, text, my, finish, fallback, onStart, onNearEnd) {
+function playUrl(url, my, finish, fallback, onStart, onNearEnd) {
   // Use the element that already loaded this sentence, if any; otherwise load it now.
   const warmed = players.find(el => el.dataset.url === url);
   players.forEach(el => { el.onended = el.onplaying = el.onerror = null; });
@@ -1320,8 +1295,6 @@ function playUrl(url, text, my, finish, fallback, onStart, onNearEnd) {
     dlog("playing");
     $("soundHint").hidden = true;
     clearTimeout(sayTimer);
-    const el = player;
-    sweepStart(text, my, () => el.duration ? el.currentTime / el.duration : null);
     onStart && onStart();
     sayTimer = setTimeout(finish, ((player.duration || 6) / rate + 2) * 1000);
     if (onNearEnd && isFinite(player.duration)) {
@@ -1347,9 +1320,6 @@ function sayDevice(text, my, finish, onStart) {
   u.lang = v ? v.lang : "en-US";
   u.rate = rate;
   u.onend = finish;
-  // Word positions as they are read, where the browser reports them; otherwise an estimate from the time.
-  let boundary = -1, startedAt = 0;
-  u.onboundary = e => { if (e.name !== "sentence") boundary = e.charIndex; };
   u.onerror = e => {
     dlog("device voice error: " + e.error);
     if (my === sayGen && e.error !== "interrupted" && e.error !== "canceled") showError(`お手本を読み上げられませんでした（${e.error}）。`);
@@ -1360,9 +1330,6 @@ function sayDevice(text, my, finish, onStart) {
     clearTimeout(noStartTimer);
     dlog("device voice started");
     $("soundHint").hidden = true;
-    startedAt = performance.now();
-    const estMs = text.split(/\s+/).length * 0.4 / rate * 1000;
-    sweepStart(text, my, () => boundary >= 0 ? (boundary + 1) / text.length : Math.min(1, (performance.now() - startedAt) / estMs));
     onStart && onStart();
     // Some browsers never fire onend; fall back to an estimate of the playback time.
     sayTimer = setTimeout(finish, (text.split(/\s+/).length * 0.55 / rate + 3) * 1000);
@@ -1386,7 +1353,7 @@ function playModel() {
   speaking = true;
   stopRec();
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
-  setStatus(""); // the line under the words shows the model voice is reading
+  setStatus("お手本を再生中…");
   dlog(`model ${pos + 1}/${order.length}`);
   preText = [];
   say(items[order[pos]].en,
