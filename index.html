@@ -94,6 +94,8 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .edge.off { opacity: 0; }
 .heard { font-size: 13px; color: var(--pending); min-height: 1.4em; margin: 0; overflow-wrap: anywhere; }
 .status { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--pending); min-height: 24px; }
+/* Nothing to say (e.g. the start screen): keep the space, hide the dot. */
+.status:has(#statusText:empty) { visibility: hidden; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
 .listening .dot { background: var(--accent); animation: pulse 1.2s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
@@ -197,7 +199,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <span class="edge prev" id="edgePrev" aria-hidden="true">‹</span>
       <span class="edge next" id="edgeNext" aria-hidden="true">›</span>
     </section>
-    <div class="status" id="status"><span class="dot"></span><span id="statusText">「スタート」を押すと、表示された英文を聞き取り始めます。</span></div>
+    <div class="status" id="status"><span class="dot"></span><span id="statusText"></span></div>
     <p class="error" id="error" hidden></p>
     <section class="results" id="results" hidden></section>
   </main>
@@ -1479,7 +1481,7 @@ function goHome() {
   if (running) stop();
   loadList();
   $("startBtn").textContent = "スタート";
-  setStatus("「スタート」を押すと、表示された英文を聞き取り始めます。");
+  setStatus("");
   window.scrollTo({ top: 0 });
 }
 function showError(msg) { $("error").textContent = msg; $("error").hidden = false; }
@@ -1561,7 +1563,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", syncThem
 syncThemeLabel();
 {
   const st = showStreak();
-  if (!st.doneToday && st.current) setStatus(`「スタート」を押すと始まります。今日練習すると${st.current + 1}日連続になります。`);
+  if (!st.doneToday && st.current) setStatus(`今日練習すると${st.current + 1}日連続になります。`);
 }
 function gUi() {
   const on = !!store.get("gKey", "");
