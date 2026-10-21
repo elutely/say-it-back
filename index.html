@@ -104,6 +104,8 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .voice-bar, .set-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
 .voice-bar label, .set-bar label { color: var(--pending); min-width: 7.5em; }
 .voice-bar select, .set-bar select { flex: 1; min-width: 0; }
+.set-bar label.hide-toggle { min-width: 0; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
+.hide-toggle input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
 .set-name { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .set-name label { font-size: 13px; color: var(--pending); }
 .set-name input {
@@ -205,6 +207,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
   <div class="set-bar">
     <label for="setSelect">練習するセット</label>
     <select id="setSelect"></select>
+    <label class="hide-toggle" id="hideToggle" hidden><input type="checkbox" id="hideOn"> 語句を隠す</label>
   </div>
 
   <div class="voice-bar" id="voiceBar">
@@ -484,6 +487,8 @@ let lastHeard = "", lastHeardAt = 0;
 let silenceSec = parseFloat(store.get("silence", "2")) || 2;
 const GIVE_UP_SEC = 12;
 let ttsOn = store.get("tts", "1") === "1";
+// Hiding the phrases in the "hide" column can be turned off (kept per browser, not synced).
+let hideOn = store.get("hideOn", "1") === "1";
 let rate = parseFloat(store.get("rate", "0.9")) || 0.9;
 // Voice ids: "k:<name>" = natural voice (Kokoro, pre-made audio files), "d:<name>" = a voice built into the device,
 // "g:<name>" = Google Cloud voice (needs the learner's own API key).
@@ -863,6 +868,7 @@ function deleteSet() {
 
 function loadList(indices) {
   items = parseList(currentSet()?.list || "");
+  $("hideToggle").hidden = !items.some(x => x.hide); // only for a set that has phrases to hide
   order = indices || items.map((_, i) => i);
   if (!indices && $("shuffle").checked) order.sort(() => Math.random() - 0.5);
   pos = 0; results = [];
@@ -880,7 +886,7 @@ function show() {
   $("ja").textContent = item.ja;
   words = item.en.split(/\s+/);
   hits = words.map(() => false);
-  hidden = hiddenWords(words, item.hide);
+  hidden = hideOn ? hiddenWords(words, item.hide) : words.map(() => false);
   judged = false;
   completing = false;
   lastHeard = "";
@@ -1484,6 +1490,13 @@ $("startBtn").onclick = () => running ? stop() : start();
 $("replayBtn").onclick = replay;
 $("cue").checked = cueOn;
 $("cue").onchange = e => { cueOn = e.target.checked; store.set("cue", cueOn ? "1" : "0"); };
+$("hideOn").checked = hideOn;
+$("hideOn").onchange = e => {
+  hideOn = e.target.checked; store.set("hideOn", hideOn ? "1" : "0");
+  // Applies to the card on screen at once (a judged sentence stays fully shown).
+  const item = items[order[pos]];
+  if (item && $("results").hidden) { hidden = hideOn ? hiddenWords(words, item.hide) : words.map(() => false); paint(judged); }
+};
 $("tts").checked = ttsOn;
 $("tts").onchange = e => { ttsOn = e.target.checked; store.set("tts", ttsOn ? "1" : "0"); syncVoiceBar(); };
 $("rate").value = rate; $("rateVal").textContent = rate;
