@@ -383,7 +383,7 @@ function matchWords(targetWords, spokenText) {
   return total.map((c, k) => c === 0 || got[k] === c);
 }
 // Words to hide: the phrases in the "hide" column, separated by commas. Every place a phrase appears is hidden.
-// A phrase is written like a dictionary entry: "(sb)" / "sb" / "sth" stand for 0-4 words (not hidden; 0 for "got kicked out"),
+// A phrase is written like a dictionary entry: "(sb)" / "(sb)'s" / "sb" / "sth" stand for 0-4 words (not hidden; 0 for "got kicked out"),
 // "one's" / "oneself" for my, your... / myself, yourself..., and each word also matches its -s / -ed / -ing / irregular forms.
 function hidePhrases(text) {
   // Commas inside brackets ("(sb, sth)") do not split phrases.
@@ -432,7 +432,7 @@ function hiddenWords(words, hideText) {
   const ws = words.map(norm), out = words.map(() => false);
   hidePhrases(hideText).forEach(p => {
     // Pieces: a word to hide (its forms), or a gap for "(sb)" etc. Gaps at either end do not matter.
-    const pieces = p.replace(/[（(][^）)]*[）)]/g, " (…) ").trim().split(/\s+/).map(x => x === "(…)" || /^(sb|sth|sb's|sth's)\.?$/i.test(x) ? null : norm(x))
+    const pieces = p.replace(/[（(][^）)]*[）)](?:['’]s)?/g, " (…) ").trim().split(/\s+/).map(x => x === "(…)" || /^(sb|sth|sb's|sth's)\.?$/i.test(x) ? null : norm(x))
       .filter(x => x !== "").map(x => x === null ? null : wordForms(x));
     while (pieces[0] === null) pieces.shift();
     while (pieces.length && pieces.at(-1) === null) pieces.pop();
