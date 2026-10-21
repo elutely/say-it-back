@@ -204,6 +204,13 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <section class="results" id="results" hidden></section>
   </main>
 
+  <div class="controls">
+    <button class="primary" id="startBtn" type="button">スタート</button>
+    <button id="replayBtn" type="button" disabled>もう一度聞く</button>
+    <button id="retryBtn" type="button" hidden>言えなかった文だけもう一度</button>
+    <button id="homeBtn" type="button" hidden>最初の画面に戻る</button>
+  </div>
+
   <div class="set-bar">
     <label for="setSelect">練習するセット</label>
     <select id="setSelect"></select>
@@ -216,13 +223,6 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <button id="previewBtn" type="button">試聴</button>
     <p class="tts-note" id="ttsNote" hidden></p>
     <p class="tts-note" id="gUsage" hidden></p>
-  </div>
-
-  <div class="controls">
-    <button class="primary" id="startBtn" type="button">スタート</button>
-    <button id="replayBtn" type="button" disabled>もう一度聞く</button>
-    <button id="retryBtn" type="button" hidden>言えなかった文だけもう一度</button>
-    <button id="homeBtn" type="button" hidden>最初の画面に戻る</button>
   </div>
 
   <details id="settingsBox">
