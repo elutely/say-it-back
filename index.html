@@ -170,6 +170,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
 .res span { min-width: 0; }
 .res .miss { color: var(--muted); text-decoration: line-through; }
 .error { color: var(--warn); font-size: 14px; margin: 0; }
+.diag { margin: 0; max-height: 220px; overflow: auto; font-size: 12px; line-height: 1.5; color: var(--pending); white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
@@ -201,6 +202,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     </section>
     <div class="status" id="status"><span class="dot"></span><span id="statusText"></span></div>
     <p class="error" id="error" hidden></p>
+    <p class="error" id="soundHint" hidden>お手本が鳴らないときは「もう一度聞く」を押してください（イヤホンをつないだあとなど）。</p>
     <section class="results" id="results" hidden></section>
   </main>
 
@@ -309,6 +311,15 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
           <button id="syncOffBtn" type="button">この端末の同期をやめる</button>
         </div>
         <p class="sync-state" id="syncState">同期していません。記録と英文リストはこのブラウザの中だけに保存されています。</p>
+      </section>
+      <section class="sync" aria-labelledby="diagTitle">
+        <h3 id="diagTitle">診断ログ</h3>
+        <p class="hint">お手本が鳴らないなどの不具合を調べるための記録です（この端末の中だけ、同期しません）。</p>
+        <div class="row">
+          <button id="diagCopyBtn" type="button">コピー</button>
+          <button id="diagClearBtn" type="button">消す</button>
+        </div>
+        <pre class="diag" id="diag"></pre>
       </section>
       <p class="hint">PC の Chrome 向けに作っています。Safari（iPhone）も音声認識に対応していますが、途中で聞き取りが止まることがあります。Firefox は非対応。音声認識はブラウザの機能を使うため、オンラインで使ってください。ファイルを直接開くと、文ごとにマイクの許可を聞かれます。URL（https か localhost）で開くと許可が記憶されます。</p>
     </div>
@@ -718,6 +729,16 @@ function gPump() {
       .catch(err => { gFailed(err); resolve(null); })
       .finally(() => { g.running--; gPump(); });
   }
+}
+// ---- Diagnostic log: what happened to the model voice (kept in this browser only, never synced) ----
+let diagLines = (() => { try { return JSON.parse(store.get("diag", "[]")) || []; } catch { return []; } })();
+function dlog(msg) {
+  const d = new Date();
+  diagLines.push(`${d.toTimeString().slice(0, 8)}.${String(d.getMilliseconds()).padStart(3, "0")} ${msg}`);
+  diagLines = diagLines.slice(-120);
+  store.set("diag", JSON.stringify(diagLines));
+  const el = document.getElementById("diag");
+  if (el) el.textContent = diagLines.join("\n");
 }
 // One audio element for the whole session: phones only let an element play from a timer after it was started in a tap.
 // Two elements: one plays, the other loads the next sentence ahead of time, so playback starts at once.
@@ -1217,12 +1238,16 @@ function deviceVoice() {
   return en.find(v => v.name === want) || en.find(v => new RegExp("en[-_]" + accent, "i").test(v.lang)) || en[0] || null;
 }
 // Phones allow sound only after it is first started inside a tap: call this at the top of a tap handler, before any await.
-function unlockAudio() {
-  if (ttsUnlocked) return;
+// force: do it again. On iPhone, plugging in earphones or connecting Bluetooth can take sound away from the page
+// until the next tap, so the taps on start / resume / "もう一度聞く" unlock again.
+function unlockAudio(force) {
+  if (ttsUnlocked && !force) return;
   ttsUnlocked = true;
+  dlog("unlock" + (force ? " (again)" : ""));
   try { if (synth) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); } } catch {}
-  players.forEach(el => { try { el.src = SILENT_MP3; el.dataset.url = ""; el.play().catch(() => {}); } catch {} });
+  players.forEach(el => { try { el.src = SILENT_MP3; el.dataset.url = ""; el.play().catch(e => dlog("unlock play rejected: " + e.name)); } catch {} });
 }
+function soundFailed(why) { dlog(why); $("soundHint").hidden = false; }
 function stopSay() {
   sayGen++;
   clearTimeout(sayTimer); clearTimeout(noStartTimer); clearTimeout(nearTimer);
@@ -1242,9 +1267,10 @@ function say(text, done, onStart, onNearEnd) {
     clearTimeout(sayTimer); clearTimeout(noStartTimer);
     done && done();
   };
-  const fallback = () => {
+  const fallback = why => {
     if (fellBack || finished || my !== sayGen) return;
     fellBack = true;
+    soundFailed("audio failed (" + (why || "?") + "), using device voice");
     clearTimeout(sayTimer);
     player.onplaying = player.onended = player.onerror = null;
     try { player.pause(); } catch {}
@@ -1262,9 +1288,11 @@ function playUrl(url, my, finish, fallback, onStart, onNearEnd) {
   players.forEach(el => { el.onended = el.onplaying = el.onerror = null; });
   player = warmed || player;
   player.onended = finish;
-  player.onerror = fallback;
+  player.onerror = () => fallback("error " + (player.error?.code || ""));
   player.onplaying = () => {
     if (my !== sayGen) return;
+    dlog("playing");
+    $("soundHint").hidden = true;
     clearTimeout(sayTimer);
     onStart && onStart();
     sayTimer = setTimeout(finish, ((player.duration || 6) / rate + 2) * 1000);
@@ -1278,8 +1306,9 @@ function playUrl(url, my, finish, fallback, onStart, onNearEnd) {
   if (player.dataset.url !== url) { player.src = url; player.dataset.url = url; }
   else { try { player.currentTime = 0; } catch {} }
   player.playbackRate = rate;
-  player.play().catch(fallback);
-  sayTimer = setTimeout(() => { if (player.paused) fallback(); }, 4000);
+  dlog("play " + decodeURIComponent(url.split("/").pop()).slice(0, 40) + (audio ? " ctx=" + audio.state : ""));
+  player.play().catch(e => fallback("play rejected: " + e.name + " " + e.message));
+  sayTimer = setTimeout(() => { if (player.paused) fallback("no start in 4s"); }, 4000);
 }
 function sayDevice(text, my, finish, onStart) {
   if (!synth) return finish();
@@ -1291,25 +1320,29 @@ function sayDevice(text, my, finish, onStart) {
   u.rate = rate;
   u.onend = finish;
   u.onerror = e => {
+    dlog("device voice error: " + e.error);
     if (my === sayGen && e.error !== "interrupted" && e.error !== "canceled") showError(`お手本を読み上げられませんでした（${e.error}）。`);
     finish();
   };
   u.onstart = () => {
     if (my !== sayGen) return;
     clearTimeout(noStartTimer);
+    dlog("device voice started");
+    $("soundHint").hidden = true;
     onStart && onStart();
     // Some browsers never fire onend; fall back to an estimate of the playback time.
     sayTimer = setTimeout(finish, (text.split(/\s+/).length * 0.55 / rate + 3) * 1000);
   };
   noStartTimer = setTimeout(() => {
     if (my !== sayGen) return;
-    showError("お手本の読み上げが始まりませんでした。端末の音量と、マナーモードを確認してください。");
+    soundFailed("device voice did not start in 5s");
     finish();
   }, 5000);
   // Android Chrome drops an utterance queued right after cancel(), so leave a short gap after one.
   setTimeout(() => {
     if (my !== sayGen) return;
     try { synth.resume(); } catch {}
+    dlog("device voice speak");
     synth.speak(u);
   }, Math.max(0, 250 - (performance.now() - cancelledAt)));
 }
@@ -1320,6 +1353,7 @@ function playModel() {
   stopRec();
   clearTimeout(silenceTimer); clearTimeout(giveUpTimer);
   setStatus("お手本を再生中…");
+  dlog(`model ${pos + 1}/${order.length}`);
   preText = [];
   say(items[order[pos]].en,
     () => { if (my === modelGen && running && !judged) listen(); },
@@ -1333,6 +1367,8 @@ function endModel() {
 }
 function replay() {
   if (!running || judged) return;
+  unlockAudio(true);
+  try { audio?.resume(); } catch {}
   playModel();
 }
 // Move to the previous (-1) or next (+1) sentence. While practicing, a sentence left without an answer
@@ -1410,8 +1446,11 @@ document.addEventListener("keydown", e => {
 async function start() {
   $("error").hidden = true;
   if (!Rec) { showError("このブラウザは音声認識に対応していません。Chrome（PC / Android）か Safari で開いてください。"); return; }
-  unlockAudio();
-  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}
+  unlockAudio(true);
+  try {
+    if (!audio) { audio = new (window.AudioContext || window.webkitAudioContext)(); audio.onstatechange = () => dlog("ctx " + audio.state); }
+    await audio.resume();
+  } catch {}
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   if (pos >= order.length || !$("results").hidden) loadList();
   running = true;
@@ -1479,6 +1518,7 @@ function finish() {
 // Back to the start screen without reloading: first sentence of the chosen set, ready to start.
 function goHome() {
   if (running) stop();
+  $("soundHint").hidden = true;
   loadList();
   $("startBtn").textContent = "スタート";
   setStatus("");
@@ -1546,7 +1586,16 @@ $("silence").value = silenceSec; $("silenceVal").textContent = silenceSec;
 $("silence").oninput = e => { silenceSec = parseFloat(e.target.value); $("silenceVal").textContent = silenceSec; store.set("silence", silenceSec); };
 $("shuffle").checked = store.get("shuffle", "0") === "1";
 $("shuffle").onchange = e => store.set("shuffle", e.target.checked ? "1" : "0");
-document.addEventListener("visibilitychange", () => { if (document.hidden && running) stop(); });
+document.addEventListener("visibilitychange", () => { dlog("visibility " + document.visibilityState); if (document.hidden && running) stop(); });
+navigator.mediaDevices?.addEventListener?.("devicechange", () => dlog("devicechange"));
+$("diag").textContent = diagLines.join("\n");
+$("diagCopyBtn").onclick = async () => {
+  const text = `${navigator.userAgent}\n` + diagLines.join("\n");
+  try { await navigator.clipboard.writeText(text); $("diagCopyBtn").textContent = "コピーしました"; }
+  catch { getSelection().selectAllChildren($("diag")); $("diagCopyBtn").textContent = "選択しました（長押しでコピー）"; }
+  setTimeout(() => { $("diagCopyBtn").textContent = "コピー"; }, 2500);
+};
+$("diagClearBtn").onclick = () => { diagLines = []; store.set("diag", "[]"); $("diag").textContent = ""; };
 
 function isDark() {
   const t = document.documentElement.dataset.theme;
