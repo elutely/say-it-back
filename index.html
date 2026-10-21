@@ -92,7 +92,6 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .edge { position: absolute; top: 50%; transform: translateY(-50%); font-size: 26px; line-height: 1; color: var(--muted); pointer-events: none; transition: opacity .15s; }
 .edge.prev { left: 8px; } .edge.next { right: 8px; }
 .edge.off { opacity: 0; }
-.swipe-hint { font-size: 12px; color: var(--muted); margin: -10px 0 0; text-align: center; }
 .heard { font-size: 13px; color: var(--pending); min-height: 1.4em; margin: 0; overflow-wrap: anywhere; }
 .status { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--pending); min-height: 24px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
@@ -198,7 +197,6 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <span class="edge prev" id="edgePrev" aria-hidden="true">‹</span>
       <span class="edge next" id="edgeNext" aria-hidden="true">›</span>
     </section>
-    <p class="swipe-hint" id="nav">カードの左右の端をタップするか、スワイプで前後の文へ</p>
     <div class="status" id="status"><span class="dot"></span><span id="statusText">「スタート」を押すと、表示された英文を聞き取り始めます。</span></div>
     <p class="error" id="error" hidden></p>
     <section class="results" id="results" hidden></section>
@@ -880,7 +878,7 @@ function show() {
   $("count").textContent = `${Math.min(pos + 1, order.length)} / ${order.length}`;
   $("bar").style.width = (order.length ? pos / order.length * 100 : 0) + "%";
   $("card").classList.remove("ok");
-  $("card").hidden = false; $("nav").hidden = false; syncNav();
+  $("card").hidden = false; syncNav();
   $("heard").textContent = "";
   if (!item) { $("sentence").textContent = ""; $("ja").textContent = ""; return; }
   $("ja").textContent = item.ja;
@@ -1442,7 +1440,7 @@ function finish() {
   const score = wordTotal ? Math.round(wordHit / wordTotal * 100) : 0;
   setStatus(`終了。${score}点でした。`);
   $("sentence").textContent = ""; $("ja").textContent = ""; $("heard").textContent = "";
-  $("card").hidden = true; $("nav").hidden = true;
+  $("card").hidden = true;
   const box = $("results");
   const card = document.createElement("div"); card.className = "score";
   const num = document.createElement("div"); num.className = "score-num";
