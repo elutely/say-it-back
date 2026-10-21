@@ -82,6 +82,8 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .w { color: var(--pending); transition: color .15s; border-bottom: 3px solid transparent; }
 .w.hit { color: var(--ink); border-bottom-color: var(--accent); }
 .w.miss { color: var(--muted); }
+/* A hidden word keeps its place (and length) but not its letters, until it is said or the sentence is judged. */
+.w.hide { color: transparent; background: var(--line); border-radius: 6px; border-bottom-color: transparent; }
 .card.ok { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .card { touch-action: pan-y; user-select: none; -webkit-user-select: none; transition: transform .18s ease, opacity .18s ease; }
 .card.dragging { transition: none; cursor: grabbing; }
@@ -121,7 +123,7 @@ button:disabled { opacity: .5; cursor: default; }
 details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
 summary { cursor: pointer; font-weight: 500; }
 .settings { display: grid; gap: 12px; margin-top: 12px; }
-.boxes { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
+.boxes { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) minmax(0, 2fr); gap: 12px; }
 .box { display: grid; gap: 6px; min-width: 0; }
 .box label { font-size: 13px; color: var(--pending); display: flex; justify-content: space-between; gap: 8px; }
 .box label span { font-variant-numeric: tabular-nums; }
@@ -130,7 +132,7 @@ summary { cursor: pointer; font-weight: 500; }
   border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); resize: vertical;
   white-space: pre; overflow-x: auto;
 }
-#enBox { font-family: var(--font-say); }
+#enBox, #hideBox { font-family: var(--font-say); }
 #jaBox { font-family: var(--font-ui); }
 .mismatch { color: var(--warn); font-size: 13px; margin: 0; }
 @media (max-width: 560px) { .boxes { grid-template-columns: minmax(0, 1fr); } .box textarea { min-height: 160px; } }
@@ -223,7 +225,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
   <details id="settingsBox">
     <summary>英文リストと設定</summary>
     <div class="settings">
-      <p class="hint">英文のリストは「セット」ごとに名前を付けて、いくつでも保存できます。下で編集しているのは、最初の画面で選んでいるセットです。英文と和訳はそれぞれの欄に1行に1文ずつ入れ、同じ行どうしが組になります（和訳は空でも可）。</p>
+      <p class="hint">英文のリストは「セット」ごとに名前を付けて、いくつでも保存できます。下で編集しているのは、最初の画面で選んでいるセットです。英文と和訳はそれぞれの欄に1行に1文ずつ入れ、同じ行どうしが組になります（和訳は空でも可）。「隠す語句」に英文の一部を入れると、カードではその部分が隠れ、言えたところから表示されます（判定のあとは全部表示）。1行に複数あるときは「,」で区切ります。</p>
       <div class="set-name">
         <label for="setName">セット名</label>
         <input id="setName" type="text" maxlength="40" placeholder="例：旅行の英会話">
@@ -236,6 +238,10 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
         <div class="box">
           <label for="jaBox">和訳 <span id="jaCount"></span></label>
           <textarea id="jaBox" spellcheck="false" placeholder="もう一度言っていただけますか？"></textarea>
+        </div>
+        <div class="box">
+          <label for="hideBox">隠す語句 <span id="hideCount"></span></label>
+          <textarea id="hideBox" spellcheck="false" lang="en" placeholder="say that again, please"></textarea>
         </div>
       </div>
       <p class="mismatch" id="mismatch" hidden></p>
@@ -376,6 +382,19 @@ function matchWords(targetWords, spokenText) {
   // A word with no comparable tokens (e.g. a lone dash) counts as said.
   return total.map((c, k) => c === 0 || got[k] === c);
 }
+// Words to hide: the phrases in the "hide" column, separated by commas. Every place a phrase appears is hidden.
+function hidePhrases(text) { return (text || "").split(/[,、，]/).map(x => x.trim()).filter(Boolean); }
+function hiddenWords(words, hideText) {
+  const norm = w => w.toLowerCase().replace(/[’‘`]/g, "'").replace(/[^a-z0-9']/g, "");
+  const ws = words.map(norm), out = words.map(() => false);
+  hidePhrases(hideText).forEach(p => {
+    const ps = p.split(/\s+/).map(norm).filter(Boolean);
+    if (!ps.length) return;
+    for (let i = 0; i + ps.length <= ws.length; i++)
+      if (ps.every((x, k) => ws[i + k] === x)) ps.forEach((_, k) => { out[i + k] = true; });
+  });
+  return out;
+}
 /* ===== MATCH-END ===== */
 
 const SAMPLE = `Could you say that again, please? | もう一度言っていただけますか？
@@ -395,7 +414,7 @@ const store = {
 const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 let items = [], order = [], pos = 0, results = [], nextTimer = null;
-let hits = [], words = [], running = false, judged = false, speaking = false, modelGen = 0;
+let hits = [], hidden = [], words = [], running = false, judged = false, speaking = false, modelGen = 0;
 let rec = null, gen = 0, restarts = 0, completing = false, cued = false;
 // The mic is started a little before the model voice ends, to hide its start-up delay.
 // recState: "off" | "starting" | "live". preText: what it heard of the model voice, per result, to strip later.
@@ -648,39 +667,47 @@ let sayGen = 0, sayTimer = null, nearTimer = null;
 
 function parseList(text) {
   return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
-    const [en, ja = ""] = l.split("|").map(x => x.trim());
-    return { en, ja };
+    const [en, ja = "", hide = ""] = l.split("|").map(x => x.trim());
+    return { en, ja, hide };
   }).filter(x => x.en);
 }
 // ---- Sentence list editor: an English box and a Japanese box, paired line by line ----
 const boxLines = id => $(id).value.split(/\r?\n/).map(l => l.replace(/\|/g, " ").trim());
 function listText() {
-  const en = boxLines("enBox"), ja = boxLines("jaBox");
-  return en.map((e, i) => e ? (ja[i] ? `${e} | ${ja[i]}` : e) : "").filter(Boolean).join("\n");
+  const en = boxLines("enBox"), ja = boxLines("jaBox"), hide = boxLines("hideBox");
+  return en.map((e, i) => !e ? "" : hide[i] ? `${e} | ${ja[i] || ""} | ${hide[i]}` : ja[i] ? `${e} | ${ja[i]}` : e).filter(Boolean).join("\n");
 }
 function renderBoxes(text) {
   const list = parseList(text);
   $("enBox").value = list.map(x => x.en).join("\n");
   $("jaBox").value = list.map(x => x.ja).join("\n");
+  $("hideBox").value = list.map(x => x.hide).join("\n");
   checkBoxes();
 }
 // Shows line counts, and warns when the two boxes no longer line up.
 function checkBoxes() {
   const count = id => { const l = boxLines(id); while (l.length && !l.at(-1)) l.pop(); return l; };
-  const en = count("enBox"), ja = count("jaBox");
+  const en = count("enBox"), ja = count("jaBox"), hide = count("hideBox");
   $("enCount").textContent = `${en.filter(Boolean).length}文`;
   $("jaCount").textContent = `${ja.filter(Boolean).length}行`;
-  const extraJa = ja.length > en.length;
+  $("hideCount").textContent = `${hide.filter(Boolean).length}行`;
+  const extraJa = ja.length > en.length, extraHide = hide.length > en.length;
   const blankEn = en.some(l => !l);
-  $("mismatch").hidden = !(extraJa || blankEn);
-  $("mismatch").textContent = extraJa ? `和訳が英文より多くなっています（英文 ${en.length} 行、和訳 ${ja.length} 行）。同じ行どうしが組になるので、行をそろえてください。`
-    : blankEn ? "英文に空の行があります。空の行の文は練習に出ません（和訳との組がずれていないか確認してください）。" : "";
+  // Phrases to hide that are not in their sentence (a typo, or the lines no longer line up).
+  const notFound = hide.flatMap((h, i) => en[i] ? hidePhrases(h).filter(p => !hiddenWords(en[i].split(/\s+/), p).some(Boolean)).map(p => `${i + 1}行目「${p}」`) : []);
+  const msg = extraJa ? `和訳が英文より多くなっています（英文 ${en.length} 行、和訳 ${ja.length} 行）。同じ行どうしが組になるので、行をそろえてください。`
+    : extraHide ? `隠す語句が英文より多くなっています（英文 ${en.length} 行、隠す語句 ${hide.length} 行）。同じ行どうしが組になるので、行をそろえてください。`
+    : blankEn ? "英文に空の行があります。空の行の文は練習に出ません（和訳との組がずれていないか確認してください）。"
+    : notFound.length ? `隠す語句が英文の中に見つかりません：${notFound.slice(0, 3).join("、")}${notFound.length > 3 ? ` ほか${notFound.length - 3}件` : ""}` : "";
+  $("mismatch").hidden = !msg;
+  $("mismatch").textContent = msg;
 }
-// Keeps both boxes scrolled to the same line, so each pair can be checked side by side.
+// Keeps the boxes scrolled to the same line, so each row can be checked side by side.
 let syncing = false;
-function syncScroll(from, to) {
+function syncScroll(from) {
   if (syncing) return;
-  syncing = true; $(to).scrollTop = $(from).scrollTop;
+  syncing = true;
+  ["enBox", "jaBox", "hideBox"].forEach(id => { if (id !== from) $(id).scrollTop = $(from).scrollTop; });
   requestAnimationFrame(() => { syncing = false; });
 }
 // ---- Sentence sets: several named lists, one of them chosen for practice ----
@@ -796,17 +823,19 @@ function show() {
   $("ja").textContent = item.ja;
   words = item.en.split(/\s+/);
   hits = words.map(() => false);
+  hidden = hiddenWords(words, item.hide);
   judged = false;
   completing = false;
   lastHeard = "";
-  $("sentence").replaceChildren(...words.map(w => {
-    const s = document.createElement("span"); s.className = "w"; s.textContent = w; return s;
+  $("sentence").replaceChildren(...words.map((w, i) => {
+    const s = document.createElement("span"); s.className = hidden[i] ? "w hide" : "w"; s.textContent = w; return s;
   }));
 }
 function paint(final) {
   [...$("sentence").children].forEach((el, i) => {
     el.classList.toggle("hit", hits[i]);
     el.classList.toggle("miss", final && !hits[i]);
+    el.classList.toggle("hide", hidden[i] && !hits[i] && !final);
   });
 }
 function setStatus(text, listening) {
@@ -1523,9 +1552,8 @@ syncNow();
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !running) syncNow(); });
 
 renderSets();
-["enBox", "jaBox"].forEach(id => $(id).addEventListener("input", checkBoxes));
-$("enBox").addEventListener("scroll", () => syncScroll("enBox", "jaBox"));
-$("jaBox").addEventListener("scroll", () => syncScroll("jaBox", "enBox"));
+["enBox", "jaBox", "hideBox"].forEach(id => $(id).addEventListener("input", checkBoxes));
+["enBox", "jaBox", "hideBox"].forEach(id => $(id).addEventListener("scroll", () => syncScroll(id)));
 loadList();
 if (!Rec) showError("このブラウザは音声認識に対応していません。Chrome（PC / Android）か Safari で開いてください。");
 </script>
