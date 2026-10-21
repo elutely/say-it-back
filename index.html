@@ -383,10 +383,19 @@ function matchWords(targetWords, spokenText) {
   return total.map((c, k) => c === 0 || got[k] === c);
 }
 // Words to hide: the phrases in the "hide" column, separated by commas. Every place a phrase appears is hidden.
-// A phrase is written like a dictionary entry: "(sb)" / "sb" / "sth" stand for any 1-4 words (not hidden),
+// A phrase is written like a dictionary entry: "(sb)" / "sb" / "sth" stand for 0-4 words (not hidden; 0 for "got kicked out"),
 // "one's" / "oneself" for my, your... / myself, yourself..., and each word also matches its -s / -ed / -ing / irregular forms.
 function hidePhrases(text) {
-  return (text || "").replace(/[（(][^）)]*[）)]/g, " (…) ").split(/[,、，]/).map(x => x.trim()).filter(x => x && x !== "(…)");
+  // Commas inside brackets ("(sb, sth)") do not split phrases.
+  const out = [];
+  let cur = "", depth = 0;
+  for (const c of text || "") {
+    if (c === "(" || c === "（") depth++;
+    else if ((c === ")" || c === "）") && depth) depth--;
+    if (!depth && /[,、，]/.test(c)) { out.push(cur); cur = ""; } else cur += c;
+  }
+  out.push(cur);
+  return out.map(x => x.trim()).filter(x => x.replace(/[（(][^）)]*[）)]/g, "").trim());
 }
 const IRREGULAR = ("be am is are was were been being|have has had having|do does did done doing|go goes went gone going|" +
   "come came|take took taken|get got gotten|make made|say said|see saw seen|know knew known|think thought|give gave given|" +
@@ -423,7 +432,7 @@ function hiddenWords(words, hideText) {
   const ws = words.map(norm), out = words.map(() => false);
   hidePhrases(hideText).forEach(p => {
     // Pieces: a word to hide (its forms), or a gap for "(sb)" etc. Gaps at either end do not matter.
-    const pieces = p.split(/\s+/).map(x => x === "(…)" || /^(sb|sth|sb's|sth's)\.?$/i.test(x) ? null : norm(x))
+    const pieces = p.replace(/[（(][^）)]*[）)]/g, " (…) ").trim().split(/\s+/).map(x => x === "(…)" || /^(sb|sth|sb's|sth's)\.?$/i.test(x) ? null : norm(x))
       .filter(x => x !== "").map(x => x === null ? null : wordForms(x));
     while (pieces[0] === null) pieces.shift();
     while (pieces.length && pieces.at(-1) === null) pieces.pop();
@@ -432,7 +441,7 @@ function hiddenWords(words, hideText) {
     const from = (i, k) => {
       if (k === pieces.length) return [];
       if (pieces[k] === null) {
-        for (let n = 1; n <= 4 && i + n <= ws.length; n++) { const r = from(i + n, k + 1); if (r) return r; }
+        for (let n = 0; n <= 4 && i + n <= ws.length; n++) { const r = from(i + n, k + 1); if (r) return r; }
         return null;
       }
       if (i >= ws.length || !pieces[k].has(ws[i])) return null;
