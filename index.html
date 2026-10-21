@@ -225,7 +225,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
   <details id="settingsBox">
     <summary>英文リストと設定</summary>
     <div class="settings">
-      <p class="hint">英文のリストは「セット」ごとに名前を付けて、いくつでも保存できます。下で編集しているのは、最初の画面で選んでいるセットです。英文と和訳はそれぞれの欄に1行に1文ずつ入れ、同じ行どうしが組になります（和訳は空でも可）。「隠す語句」に英文の一部を入れると、カードではその部分が隠れ、言えたところから表示されます（判定のあとは全部表示）。1行に複数あるときは「,」で区切ります。</p>
+      <p class="hint">英文のリストは「セット」ごとに名前を付けて、いくつでも保存できます。下で編集しているのは、最初の画面で選んでいるセットです。英文と和訳はそれぞれの欄に1行に1文ずつ入れ、同じ行どうしが組になります（和訳は空でも可）。「隠す語句」に英文の一部を入れると、カードではその部分が隠れ、言えたところから表示されます（判定のあとは全部表示）。1行に複数あるときは「,」で区切ります。辞書の形のままで大丈夫です（「get back to (sb)」の括弧の部分は隠さず、「look forward to」は looked なども、「make up one's mind」は my mind なども隠します）。</p>
       <div class="set-name">
         <label for="setName">セット名</label>
         <input id="setName" type="text" maxlength="40" placeholder="例：旅行の英会話">
@@ -383,15 +383,63 @@ function matchWords(targetWords, spokenText) {
   return total.map((c, k) => c === 0 || got[k] === c);
 }
 // Words to hide: the phrases in the "hide" column, separated by commas. Every place a phrase appears is hidden.
-function hidePhrases(text) { return (text || "").split(/[,、，]/).map(x => x.trim()).filter(Boolean); }
+// A phrase is written like a dictionary entry: "(sb)" / "sb" / "sth" stand for any 1-4 words (not hidden),
+// "one's" / "oneself" for my, your... / myself, yourself..., and each word also matches its -s / -ed / -ing / irregular forms.
+function hidePhrases(text) {
+  return (text || "").replace(/[（(][^）)]*[）)]/g, " (…) ").split(/[,、，]/).map(x => x.trim()).filter(x => x && x !== "(…)");
+}
+const IRREGULAR = ("be am is are was were been being|have has had having|do does did done doing|go goes went gone going|" +
+  "come came|take took taken|get got gotten|make made|say said|see saw seen|know knew known|think thought|give gave given|" +
+  "find found|tell told|become became|leave left|feel felt|bring brought|begin began begun|keep kept|hold held|" +
+  "write wrote written|stand stood|hear heard|mean meant|meet met|run ran|pay paid|sit sat|speak spoke spoken|lie lay lain|" +
+  "lead led|grow grew grown|lose lost|fall fell fallen|send sent|build built|understand understood|draw drew drawn|" +
+  "break broke broken|spend spent|rise rose risen|drive drove driven|buy bought|wear wore worn|choose chose chosen|" +
+  "eat ate eaten|drink drank drunk|sleep slept|catch caught|teach taught|fight fought|sell sold|forget forgot forgotten|" +
+  "throw threw thrown|fly flew flown|win won|swim swam swum|sing sang sung|wake woke woken|hang hung|hide hid hidden|" +
+  "shake shook shaken|steal stole stolen|show shown|freeze froze frozen|ride rode ridden|feed fed|deal dealt|stick stuck|" +
+  "strike struck|blow blew blown|bend bent|lend lent|shoot shot|bite bit bitten|dig dug|seek sought|swear swore sworn|" +
+  "tear tore torn|forgive forgave forgiven|arise arose arisen|undergo underwent undergone|overcome overcame|" +
+  "man men|woman women|child children|person people|foot feet|tooth teeth|mouse mice|goose geese|" +
+  "life lives|wife wives|knife knives|leaf leaves|half halves|shelf shelves|thief thieves|wolf wolves")
+  .split("|").reduce((m, g) => { const [b, ...f] = g.split(" "); m[b] = f; return m; }, {});
+const ONES = { "one's": ["my", "your", "his", "her", "its", "our", "their", "one's"],
+  oneself: ["myself", "yourself", "himself", "herself", "itself", "ourselves", "yourselves", "themselves", "oneself"] };
+// Forms a phrase word (written in its base form) can take in a sentence.
+function wordForms(b) {
+  if (ONES[b]) return new Set(ONES[b]);
+  const f = new Set([b, ...(IRREGULAR[b] || [])]);
+  if (b.length >= 3 && /^[a-z]+$/.test(b)) {
+    const stem = b.endsWith("e") ? b.slice(0, -1) : b;
+    [b + "s", b + "es", stem + "ed", stem + "ing", stem + "er", stem + "est"].forEach(x => f.add(x));
+    if (/[^aeiou]y$/.test(b)) ["ies", "ied", "ier", "iest"].forEach(x => f.add(b.slice(0, -1) + x));
+    if (/[^aeiou][aeiou][bdgklmnprt]$/.test(b)) ["ed", "ing", "er", "est"].forEach(x => f.add(b + b.at(-1) + x)); // stop -> stopped
+    if (b.endsWith("ie")) f.add(b.slice(0, -2) + "ying"); // die -> dying
+    if (/(?:f|fe)$/.test(b)) f.add(b.replace(/fe?$/, "ves"));
+  }
+  return f;
+}
 function hiddenWords(words, hideText) {
-  const norm = w => w.toLowerCase().replace(/[’‘`]/g, "'").replace(/[^a-z0-9']/g, "");
+  const norm = w => w.toLowerCase().replace(/[’‘`]/g, "'").replace(/[^a-z0-9']/g, "").replace(/^'+|'+$/g, "");
   const ws = words.map(norm), out = words.map(() => false);
   hidePhrases(hideText).forEach(p => {
-    const ps = p.split(/\s+/).map(norm).filter(Boolean);
-    if (!ps.length) return;
-    for (let i = 0; i + ps.length <= ws.length; i++)
-      if (ps.every((x, k) => ws[i + k] === x)) ps.forEach((_, k) => { out[i + k] = true; });
+    // Pieces: a word to hide (its forms), or a gap for "(sb)" etc. Gaps at either end do not matter.
+    const pieces = p.split(/\s+/).map(x => x === "(…)" || /^(sb|sth|sb's|sth's)\.?$/i.test(x) ? null : norm(x))
+      .filter(x => x !== "").map(x => x === null ? null : wordForms(x));
+    while (pieces[0] === null) pieces.shift();
+    while (pieces.length && pieces.at(-1) === null) pieces.pop();
+    if (!pieces.length) return;
+    // Tries to match pieces[k..] from word i; returns the indexes of the hidden words, or null.
+    const from = (i, k) => {
+      if (k === pieces.length) return [];
+      if (pieces[k] === null) {
+        for (let n = 1; n <= 4 && i + n <= ws.length; n++) { const r = from(i + n, k + 1); if (r) return r; }
+        return null;
+      }
+      if (i >= ws.length || !pieces[k].has(ws[i])) return null;
+      const r = from(i + 1, k + 1);
+      return r && [i, ...r];
+    };
+    for (let i = 0; i < ws.length; i++) { const r = from(i, 0); if (r) r.forEach(j => { out[j] = true; }); }
   });
   return out;
 }
