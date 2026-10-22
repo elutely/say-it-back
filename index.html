@@ -133,7 +133,21 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 }
 .set-list button:hover { background: var(--bg); }
 .set-list button.cur { background: var(--accent-soft); }
-.set-list .nm { min-width: 0; overflow-wrap: anywhere; }
+.set-list .nmwrap { min-width: 0; display: grid; gap: 2px; }
+.set-list .nm { overflow-wrap: anywhere; }
+.set-list .sub { font-size: 12px; color: var(--pending); font-weight: 400; overflow-wrap: anywhere; }
+/* Folder and tag filters above the list: one row each, scrolled sideways when long. */
+.chips { display: flex; gap: 6px; padding: 8px 12px 0; overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chips:last-of-type { padding-bottom: 8px; }
+.chip {
+  flex: none; padding: 5px 12px; font-size: 13px; font-weight: 500; border-radius: 99px; white-space: nowrap;
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+}
+.chip.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.chip small { font-weight: 400; opacity: .75; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.chip.tag::before { content: "#"; opacity: .6; }
+.sheet-filters { border-bottom: 1px solid var(--line); }
 .set-list .meta { flex: none; font-size: 12px; color: var(--pending); font-weight: 400; font-variant-numeric: tabular-nums; }
 .sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .sheet-foot p { margin: 0; font-size: 13px; color: var(--pending); }
@@ -261,8 +275,12 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
 
   <dialog class="sheet" id="setDialog" aria-labelledby="setBtn">
     <div class="sheet-head">
-      <input type="search" id="setSearch" placeholder="セットの名前で探す" autocomplete="off" aria-label="セットの名前で探す">
+      <input type="search" id="setSearch" placeholder="名前・フォルダ・タグで探す" autocomplete="off" aria-label="名前・フォルダ・タグで探す">
       <button id="setCloseBtn" type="button">閉じる</button>
+    </div>
+    <div class="sheet-filters" id="setFilters">
+      <div class="chips" id="folderChips" aria-label="フォルダ"></div>
+      <div class="chips" id="tagChips" aria-label="タグ"></div>
     </div>
     <ul class="set-list" id="setList"></ul>
     <div class="sheet-foot">
@@ -278,6 +296,15 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <div class="set-name">
         <label for="setName">セット名</label>
         <input id="setName" type="text" maxlength="40" placeholder="例：旅行の英会話">
+      </div>
+      <div class="set-name">
+        <label for="setFolder">フォルダ</label>
+        <input id="setFolder" type="text" maxlength="30" placeholder="例：仕事（空なら入れない）" list="folderOptions" autocomplete="off">
+        <datalist id="folderOptions"></datalist>
+      </div>
+      <div class="set-name">
+        <label for="setTags">タグ</label>
+        <input id="setTags" type="text" maxlength="120" placeholder="例：イディオム, 会議（「,」で区切る）" autocomplete="off">
       </div>
       <div class="boxes">
         <div class="box">
@@ -878,6 +905,9 @@ function renderSets() {
   $("setBtnName").textContent = `${cur.name}（${parseList(cur.list).length}文）`;
   if ($("setDialog").open) renderSetList();
   $("setName").value = cur.name;
+  $("setFolder").value = cur.folder || "";
+  $("setTags").value = (cur.tags || []).join(", ");
+  $("folderOptions").replaceChildren(...allFolders().map(f => Object.assign(document.createElement("option"), { value: f })));
   renderBoxes(cur.list);
 }
 // ---- The list of sets: search by name, recently practiced first ----
@@ -896,22 +926,63 @@ function agoText(ms) {
   const days = Math.round((new Date(dayKey(new Date())) - new Date(dayKey(new Date(ms)))) / 86400000);
   return days <= 0 ? "今日" : days === 1 ? "昨日" : `${days}日前`;
 }
+// Folders (one per set, optional) and tags (any number) sort the sets; the list filters by them.
+// set.folder: string ("" = none), set.tags: [string]. Both travel with the set (sync, backup).
+const NO_FOLDER = "\u0000none";
+let listFolder = store.get("listFolder", ""), listTags = new Set();
+function parseTags(text) {
+  return [...new Set(text.split(/[,、，]/).map(t => t.trim().replace(/^#+/, "").trim()).filter(Boolean))].slice(0, 10);
+}
+function allFolders() { return [...new Set(liveSets().map(x => x.folder || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "ja")); }
+function allTags() { return [...new Set(liveSets().flatMap(x => x.tags || []))].sort((a, b) => a.localeCompare(b, "ja")); }
+function chip(label, on, count, onclick, cls = "") {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = `chip ${cls}${on ? " on" : ""}`; b.setAttribute("aria-pressed", on);
+  b.append(label);
+  if (count !== undefined) { const c = document.createElement("small"); c.textContent = count; b.append(c); }
+  b.onclick = onclick;
+  return b;
+}
 function renderSetList() {
   const q = $("setSearch").value.trim().toLowerCase();
   const used = setUsed(), cur = currentSet();
   const all = liveSets().sort((a, b) => (used[b.id] || 0) - (used[a.id] || 0) || (b.created || 0) - (a.created || 0));
-  const shown = all.filter(x => !q || x.name.toLowerCase().includes(q));
+  const folders = allFolders(), tags = allTags();
+  if (listFolder && listFolder !== NO_FOLDER && !folders.includes(listFolder)) listFolder = "";
+  listTags.forEach(t => { if (!tags.includes(t)) listTags.delete(t); });
+  const noFolder = all.filter(x => !x.folder).length;
+  const pickFolder = f => () => { listFolder = f; store.set("listFolder", f); renderSetList(); };
+  $("folderChips").replaceChildren(...(folders.length ? [
+    chip("すべて", !listFolder, all.length, pickFolder("")),
+    ...folders.map(f => chip(f, listFolder === f, all.filter(x => x.folder === f).length, pickFolder(f))),
+    ...(noFolder ? [chip("フォルダなし", listFolder === NO_FOLDER, noFolder, pickFolder(NO_FOLDER))] : [])
+  ] : []));
+  $("folderChips").hidden = !folders.length;
+  $("tagChips").replaceChildren(...tags.map(t => chip(t, listTags.has(t), undefined, () => {
+    listTags.has(t) ? listTags.delete(t) : listTags.add(t); renderSetList();
+  }, "tag")));
+  $("tagChips").hidden = !tags.length;
+  $("setFilters").hidden = !folders.length && !tags.length;
+  const inFolder = x => !listFolder || (listFolder === NO_FOLDER ? !x.folder : x.folder === listFolder);
+  const hasTags = x => [...listTags].every(t => (x.tags || []).includes(t));
+  const matches = x => !q || [x.name, x.folder || "", ...(x.tags || [])].some(v => v.toLowerCase().includes(q));
+  const shown = all.filter(x => inFolder(x) && hasTags(x) && matches(x));
   $("setList").replaceChildren(...shown.map(x => {
     const li = document.createElement("li"), b = document.createElement("button");
     b.type = "button"; b.className = x.id === cur.id ? "cur" : "";
+    const wrap = document.createElement("span"); wrap.className = "nmwrap";
     const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = x.name;
+    wrap.append(nm);
+    const sub = [x.folder, ...(x.tags || []).map(t => "#" + t)].filter(Boolean).join("  ");
+    if (sub) { const el = document.createElement("span"); el.className = "sub"; el.textContent = sub; wrap.append(el); }
     const meta = document.createElement("span"); meta.className = "meta";
     meta.textContent = `${parseList(x.list).length}文・${agoText(used[x.id])}`;
-    b.append(nm, meta);
+    b.append(wrap, meta);
     b.onclick = () => { $("setDialog").close(); if (x.id !== cur.id) chooseSet(x.id); };
     li.append(b); return li;
   }));
-  $("setListNote").textContent = q ? `${shown.length} / ${all.length} セット` : `${all.length} セット（最近練習した順）`;
+  const filtered = q || listFolder || listTags.size;
+  $("setListNote").textContent = filtered ? `${shown.length} / ${all.length} セット` : `${all.length} セット（最近練習した順）`;
 }
 function openSetList() {
   if (running) return;
@@ -953,6 +1024,8 @@ function saveCurrentSet() {
   const sets = readSets(), cur = currentSet();
   const x = sets.find(y => y.id === cur.id);
   x.name = $("setName").value.trim() || "名前なし";
+  x.folder = $("setFolder").value.trim();
+  x.tags = parseTags($("setTags").value);
   x.list = listText();
   x.at = Date.now();
   writeSets(sets);
@@ -961,10 +1034,11 @@ function saveCurrentSet() {
   goHome();
   setStatus(`「${x.name}」を保存しました。「スタート」で始めます。`);
 }
-function addSet() {
+function addSet(folder) {
   const sets = readSets(), now = Date.now();
   const n = sets.filter(x => !x.deleted).length + 1;
   const x = { id: newId(), name: `新しいセット ${n}`, list: "", at: now, created: now };
+  if (typeof folder === "string" && folder) x.folder = folder; // (also bound as a click handler: ignore the event)
   sets.push(x);
   writeSets(sets);
   store.set("setId", x.id);
@@ -1700,7 +1774,8 @@ $("setSearch").addEventListener("input", renderSetList);
 // Enter picks the first hit. preventDefault: otherwise the Enter goes on to the set button (focused again on close) and reopens the list.
 $("setSearch").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("setList").querySelector("button")?.click(); } });
 $("setDialog").addEventListener("click", e => { if (e.target === $("setDialog")) $("setDialog").close(); }); // a tap outside closes
-$("setNewBtn").onclick = () => { $("setDialog").close(); addSet(); };
+// A new set made from the list goes into the folder being shown.
+$("setNewBtn").onclick = () => { $("setDialog").close(); addSet(listFolder && listFolder !== NO_FOLDER ? listFolder : ""); };
 $("exportBtn").onclick = exportSets;
 $("importBtn").onclick = () => $("importFile").click();
 $("importFile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) importSets(f); };
