@@ -276,7 +276,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
   <dialog class="sheet" id="setDialog" aria-labelledby="setBtn">
     <div class="sheet-head">
       <input type="search" id="setSearch" placeholder="名前・フォルダ・タグで探す" autocomplete="off" aria-label="名前・フォルダ・タグで探す">
-      <button id="setCloseBtn" type="button">閉じる</button>
+      <button id="setCloseBtn" type="button" autofocus>閉じる</button>
     </div>
     <div class="sheet-filters" id="setFilters">
       <div class="chips" id="folderChips" aria-label="フォルダ"></div>
@@ -988,9 +988,11 @@ function openSetList() {
   if (running) return;
   $("setSearch").value = "";
   renderSetList();
+  // Opening a dialog focuses something inside it; on a phone, the search box would bring up the keyboard over the list.
+  // So the close button takes it (autofocus), and the search box is focused only with a mouse / keyboard.
   $("setDialog").showModal();
-  // On a phone, the keyboard would cover the list: focus the search box only with a mouse / keyboard.
   if (matchMedia("(hover: hover)").matches) $("setSearch").focus();
+  else $("setSearch").blur();
 }
 // ---- Backup: all sets to a file, and back ----
 function exportSets() {
