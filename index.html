@@ -107,6 +107,37 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .voice-bar, .set-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
 .voice-bar label, .set-bar label { color: var(--pending); min-width: 7.5em; }
 .voice-bar select, .set-bar select { flex: 1; min-width: 0; }
+.set-btn {
+  flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 12px; font-size: 14px; font-weight: 500; text-align: left; border-radius: 8px; background: var(--bg);
+}
+.set-btn span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-btn .chev { color: var(--pending); flex: none; }
+/* The list of sets: opens over the page, with a search box; recently practiced sets first. */
+.sheet {
+  width: min(560px, calc(100vw - 32px)); max-height: min(640px, calc(100dvh - 48px)); padding: 0; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--surface); color: var(--ink);
+}
+.sheet[open] { display: flex; flex-direction: column; }
+.sheet::backdrop { background: rgb(0 0 0 / 0.35); }
+.sheet-head { display: flex; gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); }
+.sheet-head input {
+  flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--ink);
+}
+.sheet-head button { padding: 8px 12px; font-size: 14px; }
+.set-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+.set-list button {
+  width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; text-align: left;
+  border: 0; border-radius: 8px; padding: 12px; background: transparent;
+}
+.set-list button:hover { background: var(--bg); }
+.set-list button.cur { background: var(--accent-soft); }
+.set-list .nm { min-width: 0; overflow-wrap: anywhere; }
+.set-list .meta { flex: none; font-size: 12px; color: var(--pending); font-weight: 400; font-variant-numeric: tabular-nums; }
+.sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.sheet-foot p { margin: 0; font-size: 13px; color: var(--pending); }
+.sheet-foot button { padding: 8px 12px; font-size: 14px; }
 .set-bar label.hide-toggle { min-width: 0; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
 .hide-toggle input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
 .set-name { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -215,8 +246,8 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
   </div>
 
   <div class="set-bar">
-    <label for="setSelect">練習するセット</label>
-    <select id="setSelect"></select>
+    <label for="setBtn">練習するセット</label>
+    <button class="set-btn" id="setBtn" type="button" aria-haspopup="dialog"><span id="setBtnName"></span><span class="chev" aria-hidden="true">▾</span></button>
     <label class="hide-toggle" id="hideToggle" hidden><input type="checkbox" id="hideOn"> 語句を隠す</label>
   </div>
 
@@ -227,6 +258,18 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <p class="tts-note" id="ttsNote" hidden></p>
     <p class="tts-note" id="gUsage" hidden></p>
   </div>
+
+  <dialog class="sheet" id="setDialog" aria-labelledby="setBtn">
+    <div class="sheet-head">
+      <input type="search" id="setSearch" placeholder="セットの名前で探す" autocomplete="off" aria-label="セットの名前で探す">
+      <button id="setCloseBtn" type="button">閉じる</button>
+    </div>
+    <ul class="set-list" id="setList"></ul>
+    <div class="sheet-foot">
+      <p id="setListNote"></p>
+      <button id="setNewBtn" type="button">＋ 新しいセット</button>
+    </div>
+  </dialog>
 
   <details id="settingsBox">
     <summary>英文リストと設定</summary>
@@ -256,6 +299,12 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
         <button id="newSetBtn" type="button">＋ 新しいセット</button>
         <button id="delSetBtn" type="button">このセットを削除</button>
       </div>
+      <div class="row">
+        <button id="exportBtn" type="button">すべてのセットを書き出す</button>
+        <button id="importBtn" type="button">書き出したファイルを読み込む</button>
+        <input type="file" id="importFile" accept=".json,application/json" hidden>
+      </div>
+      <p class="hint" id="backupNote">書き出したファイルは、このブラウザのデータが消えたときの控えになります。読み込むと、同じセットは保存が新しい方が残り、ないセットは追加されます。</p>
       <div class="row">
         <label><input type="checkbox" id="tts"> お手本を読み上げてからリピート</label>
       </div>
@@ -826,13 +875,73 @@ function ensureOneSet() {
 function renderSets() {
   ensureOneSet();
   const cur = currentSet();
-  $("setSelect").replaceChildren(...liveSets().map(x => {
-    const o = document.createElement("option");
-    o.value = x.id; o.textContent = `${x.name}（${parseList(x.list).length}文）`; o.selected = x.id === cur.id;
-    return o;
-  }));
+  $("setBtnName").textContent = `${cur.name}（${parseList(cur.list).length}文）`;
+  if ($("setDialog").open) renderSetList();
   $("setName").value = cur.name;
   renderBoxes(cur.list);
+}
+// ---- The list of sets: search by name, recently practiced first ----
+// setUsed: { <set id>: last practiced (ms) }, synced (the later time wins).
+function setUsed() { try { return JSON.parse(store.get("setUsed", "{}")) || {}; } catch { return {}; } }
+function markSetUsed() {
+  const cur = currentSet(); if (!cur) return;
+  const u = setUsed();
+  if (Date.now() - (u[cur.id] || 0) < 60000) return;
+  u[cur.id] = Date.now();
+  store.set("setUsed", JSON.stringify(u));
+  syncSoon();
+}
+function agoText(ms) {
+  if (!ms) return "まだ練習していない";
+  const days = Math.round((new Date(dayKey(new Date())) - new Date(dayKey(new Date(ms)))) / 86400000);
+  return days <= 0 ? "今日" : days === 1 ? "昨日" : `${days}日前`;
+}
+function renderSetList() {
+  const q = $("setSearch").value.trim().toLowerCase();
+  const used = setUsed(), cur = currentSet();
+  const all = liveSets().sort((a, b) => (used[b.id] || 0) - (used[a.id] || 0) || (b.created || 0) - (a.created || 0));
+  const shown = all.filter(x => !q || x.name.toLowerCase().includes(q));
+  $("setList").replaceChildren(...shown.map(x => {
+    const li = document.createElement("li"), b = document.createElement("button");
+    b.type = "button"; b.className = x.id === cur.id ? "cur" : "";
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = x.name;
+    const meta = document.createElement("span"); meta.className = "meta";
+    meta.textContent = `${parseList(x.list).length}文・${agoText(used[x.id])}`;
+    b.append(nm, meta);
+    b.onclick = () => { $("setDialog").close(); if (x.id !== cur.id) chooseSet(x.id); };
+    li.append(b); return li;
+  }));
+  $("setListNote").textContent = q ? `${shown.length} / ${all.length} セット` : `${all.length} セット（最近練習した順）`;
+}
+function openSetList() {
+  if (running) return;
+  $("setSearch").value = "";
+  renderSetList();
+  $("setDialog").showModal();
+  // On a phone, the keyboard would cover the list: focus the search box only with a mouse / keyboard.
+  if (matchMedia("(hover: hover)").matches) $("setSearch").focus();
+}
+// ---- Backup: all sets to a file, and back ----
+function exportSets() {
+  const data = { app: "say-it-back", version: 1, at: new Date().toISOString(), sets: readSets().filter(x => !x.deleted) };
+  const blob = new Blob([JSON.stringify(data, null, 1)], { type: "application/json" });
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `say-it-back-sets-${dayKey(new Date())}.json` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  $("backupNote").textContent = `${data.sets.length}セットを書き出しました（${a.download}）。`;
+}
+async function importSets(file) {
+  try {
+    const data = JSON.parse(await file.text());
+    const incoming = (data.sets || []).filter(x => x && x.id && typeof x.list === "string" && typeof x.name === "string");
+    if (!incoming.length) throw new Error("no sets");
+    const before = new Set(readSets().map(x => x.id));
+    writeSets(mergeSync({ sets: readSets() }, { sets: incoming }).sets);
+    syncSoon(); renderSets(); goHome();
+    $("backupNote").textContent = `読み込みました（${incoming.length}セットのうち、新しく追加 ${incoming.filter(x => !before.has(x.id)).length}）。`;
+  } catch {
+    $("backupNote").textContent = "読み込めませんでした。このアプリで書き出したファイルを選んでください。";
+  }
 }
 function chooseSet(id) {
   store.set("setId", id);
@@ -1097,7 +1206,7 @@ async function gh(path, opts = {}) {
   return res.json();
 }
 function localData() {
-  return { days: practiceDays(), sets: readSets(), usage: gUsage() };
+  return { days: practiceDays(), sets: readSets(), usage: gUsage(), used: setUsed() };
 }
 // Pure merge of two copies: union of days, newer list wins.
 function mergeSync(a, b) {
@@ -1116,7 +1225,10 @@ function mergeSync(a, b) {
     Object.entries(devs || {}).forEach(([d, n]) => { usage[m][d] = Math.max(usage[m][d] || 0, n); });
   }));
   Object.keys(usage).sort().slice(0, -3).forEach(m => delete usage[m]); // keep the last 3 months
-  return { days, sets, usage };
+  // When each set was last practiced: the later time wins.
+  const used = {};
+  [a.used || {}, b.used || {}].forEach(u => Object.entries(u).forEach(([id, t]) => { used[id] = Math.max(used[id] || 0, t); }));
+  return { days, sets, usage, used };
 }
 async function findGist() {
   let id = store.get("gistId", "");
@@ -1151,6 +1263,7 @@ async function syncNow() {
     const merged = mergeSync(local, remote);
     if (JSON.stringify(merged.days) !== JSON.stringify(local.days)) { store.set("days", JSON.stringify(merged.days)); showStreak(); }
     if (JSON.stringify(merged.usage) !== JSON.stringify(local.usage)) { store.set("gUsage", JSON.stringify(merged.usage)); showUsage(); }
+    if (JSON.stringify(merged.used) !== JSON.stringify(local.used)) store.set("setUsed", JSON.stringify(merged.used));
     if (JSON.stringify(merged.sets) !== JSON.stringify(local.sets)) {
       writeSets(merged.sets);
       if (!running) { renderSets(); loadList(); }
@@ -1182,7 +1295,7 @@ function judge() {
   const ok = hits.every(Boolean);
   paint(true);
   results[pos] = { idx: order[pos], ok, hits: hits.slice() }; // by position: going back and redoing replaces it
-  if (hits.some(Boolean)) recordPractice(); // a skipped or silent sentence does not count
+  if (hits.some(Boolean)) { recordPractice(); markSetUsed(); } // a skipped or silent sentence does not count
   if (ok) { ping(); $("card").classList.add("ok"); setStatus("正解！"); }
   else setStatus(`${hits.filter(Boolean).length} / ${hits.length} 語。グレーの部分が言えていません。`);
   nextTimer = setTimeout(next, ok ? 600 : 1600);
@@ -1455,7 +1568,7 @@ async function start() {
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   if (pos >= order.length || !$("results").hidden) loadList();
   running = true;
-  $("startBtn").textContent = "一時停止"; $("previewBtn").disabled = true; $("setSelect").disabled = true;
+  $("startBtn").textContent = "一時停止"; $("previewBtn").disabled = true; $("setBtn").disabled = true;
   $("settingsBox").open = false;
   show();
   begin();
@@ -1467,7 +1580,7 @@ function stop() {
   endModel();
   stopRec();
   try { wakeLock?.release(); } catch {}
-  $("startBtn").textContent = "再開"; $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setSelect").disabled = false;
+  $("startBtn").textContent = "再開"; $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setBtn").disabled = false;
   setStatus("一時停止中。再開すると今の文からやり直します。");
 }
 function finish() {
@@ -1581,7 +1694,16 @@ $("retryBtn").onclick = () => {
 $("saveBtn").onclick = saveCurrentSet;
 $("newSetBtn").onclick = addSet;
 $("delSetBtn").onclick = deleteSet;
-$("setSelect").onchange = e => chooseSet(e.target.value);
+$("setBtn").onclick = openSetList;
+$("setCloseBtn").onclick = () => $("setDialog").close();
+$("setSearch").addEventListener("input", renderSetList);
+// Enter picks the first hit. preventDefault: otherwise the Enter goes on to the set button (focused again on close) and reopens the list.
+$("setSearch").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("setList").querySelector("button")?.click(); } });
+$("setDialog").addEventListener("click", e => { if (e.target === $("setDialog")) $("setDialog").close(); }); // a tap outside closes
+$("setNewBtn").onclick = () => { $("setDialog").close(); addSet(); };
+$("exportBtn").onclick = exportSets;
+$("importBtn").onclick = () => $("importFile").click();
+$("importFile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) importSets(f); };
 $("homeBtn").onclick = goHome;
 $("silence").value = silenceSec; $("silenceVal").textContent = silenceSec;
 $("silence").oninput = e => { silenceSec = parseFloat(e.target.value); $("silenceVal").textContent = silenceSec; store.set("silence", silenceSec); };
