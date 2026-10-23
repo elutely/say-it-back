@@ -259,7 +259,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <button class="primary" id="startBtn" type="button">スタート</button>
     <button id="replayBtn" type="button" disabled>もう一度聞く</button>
     <button id="retryBtn" type="button" hidden>言えなかった文だけもう一度</button>
-    <button id="homeBtn" type="button" hidden>最初の画面に戻る</button>
+    <button id="homeBtn" type="button" hidden>最初に戻る</button>
     <button id="nextBtn" type="button" hidden>次のセットへ</button>
   </div>
 
@@ -1698,7 +1698,7 @@ function nextSet() {
   return pool.length > 1 ? pool[(pool.findIndex(x => x.id === cur.id) + 1) % pool.length] : null;
 }
 // Buttons on the results: [言えなかった文だけもう一度] (only with misses, first and full width), then
-// [最初の画面に戻る] [次のセットへ]. The one to press next stands out. Practicing / the start screen: スタート etc. as usual.
+// [最初に戻る] [次のセットへ]. The one to press next stands out. Practicing / the start screen: スタート etc. as usual.
 function resultButtons(on, missed) {
   const next = on ? nextSet() : null;
   $("controls").classList.toggle("retry-first", on && missed);
