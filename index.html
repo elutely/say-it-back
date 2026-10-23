@@ -122,7 +122,8 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .controls { display: flex; gap: 10px; flex-wrap: wrap; }
 /* Results with missed sentences: "言えなかった文だけもう一度" comes first and stands out. */
 .controls.retry-first #retryBtn { order: -1; flex-basis: 100%; }
-.controls #startBtn { order: 1; } /* スタート / 一時停止 on the right */
+.controls #startBtn { order: 1; display: inline-flex; align-items: center; justify-content: center; }
+#startBtn .ico { width: 26px; height: 26px; } /* スタート / 一時停止 on the right */
 .controls #homeBtn, .controls #nextBtn { flex: 1; min-width: 0; }
 .voice-bar, .set-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
 .voice-bar label, .set-bar label { color: var(--pending); min-width: 7.5em; }
@@ -1724,7 +1725,7 @@ async function start() {
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   if (pos >= order.length || !$("results").hidden) loadList();
   running = true;
-  $("startBtn").textContent = "一時停止"; $("previewBtn").disabled = true; $("setBtn").disabled = true;
+  startLabel("pause"); $("previewBtn").disabled = true; $("setBtn").disabled = true;
   $("settingsBox").open = false;
   show();
   begin();
@@ -1736,8 +1737,8 @@ function stop() {
   endModel();
   stopRec();
   try { wakeLock?.release(); } catch {}
-  $("startBtn").textContent = "再開"; $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setBtn").disabled = false;
-  setStatus("一時停止中。再開すると今の文からやり直します。");
+  startLabel("resume"); $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setBtn").disabled = false;
+  setStatus("一時停止中");
 }
 // The set after the current one: in the same folder, in name order (back to the first after the last).
 function nextSet() {
@@ -1806,11 +1807,20 @@ function finish() {
   resultButtons(true, okCount !== done.length);
 }
 // Back to the start screen without reloading: first sentence of the chosen set, ready to start.
+// The start button: "スタート" before practice, then only an icon: pause (II) while practicing, play (▶) to resume.
+// Icons: Material Icons (Apache License 2.0).
+function startLabel(mode) {
+  const icon = d => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+  const b = $("startBtn");
+  if (mode === "start") { b.textContent = "スタート"; b.removeAttribute("aria-label"); return; }
+  b.innerHTML = mode === "pause" ? icon("M6 19h4V5H6v14zm8-14v14h4V5h-4z") : icon("M8 5v14l11-7z");
+  b.setAttribute("aria-label", mode === "pause" ? "一時停止" : "再開");
+}
 function goHome() {
   if (running) stop();
   $("soundHint").hidden = true;
   loadList();
-  $("startBtn").textContent = "スタート";
+  startLabel("start");
   setStatus("");
   window.scrollTo({ top: 0 });
 }
