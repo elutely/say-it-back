@@ -153,7 +153,7 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .sheet-filters { border-bottom: 1px solid var(--line); }
 .set-list .meta { flex: none; font-size: 12px; color: var(--pending); font-weight: 400; font-variant-numeric: tabular-nums; }
 .sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
-.sheet-foot p { margin: 0; font-size: 13px; color: var(--pending); }
+.sheet-foot p { margin: 0 auto 0 0; font-size: 13px; color: var(--pending); }
 .sheet-foot button { padding: 8px 12px; font-size: 14px; }
 .set-bar label.hide-toggle { min-width: 0; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
 .hide-toggle input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
@@ -289,6 +289,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <ul class="set-list" id="setList"></ul>
     <div class="sheet-foot">
       <p id="setListNote"></p>
+      <button id="setOrderBtn" type="button"></button>
       <button id="setNewBtn" type="button">＋ 新しいセット</button>
     </div>
   </dialog>
@@ -965,8 +966,13 @@ let listFolder = store.get("listFolder", ""), listTags = new Set();
 function parseTags(text) {
   return [...new Set(text.split(/[,、，]/).map(t => t.trim().replace(/^#+/, "").trim()).filter(Boolean))].slice(0, 10);
 }
-function allFolders() { return [...new Set(liveSets().map(x => x.folder || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "ja")); }
-function allTags() { return [...new Set(liveSets().flatMap(x => x.tags || []))].sort((a, b) => a.localeCompare(b, "ja")); }
+// Names in "natural" order: numbers by value ("Unit 2" before "Unit 10"), case and width ignored.
+const byName = new Intl.Collator("ja", { numeric: true, sensitivity: "base" }).compare;
+function setsByName(sets) { return sets.sort((a, b) => byName(a.name, b.name) || (a.created || 0) - (b.created || 0)); }
+// The list is in name order; "最近練習した順" is a switch in the list (remembered).
+let listOrder = store.get("listOrder", "name");
+function allFolders() { return [...new Set(liveSets().map(x => x.folder || "").filter(Boolean))].sort(byName); }
+function allTags() { return [...new Set(liveSets().flatMap(x => x.tags || []))].sort(byName); }
 function chip(label, on, count, onclick, cls = "") {
   const b = document.createElement("button");
   b.type = "button"; b.className = `chip ${cls}${on ? " on" : ""}`; b.setAttribute("aria-pressed", on);
@@ -978,7 +984,9 @@ function chip(label, on, count, onclick, cls = "") {
 function renderSetList() {
   const q = $("setSearch").value.trim().toLowerCase();
   const used = setUsed(), cur = currentSet();
-  const all = liveSets().sort((a, b) => (used[b.id] || 0) - (used[a.id] || 0) || (b.created || 0) - (a.created || 0));
+  const all = setsByName(liveSets());
+  if (listOrder === "recent") all.sort((a, b) => (used[b.id] || 0) - (used[a.id] || 0)); // stable: same time keeps name order
+  $("setOrderBtn").textContent = listOrder === "recent" ? "並び：最近練習した順" : "並び：名前順";
   const folders = allFolders(), tags = allTags();
   if (listFolder && listFolder !== NO_FOLDER && !folders.includes(listFolder)) listFolder = "";
   listTags.forEach(t => { if (!tags.includes(t)) listTags.delete(t); });
@@ -1014,7 +1022,7 @@ function renderSetList() {
     li.append(b); return li;
   }));
   const filtered = q || listFolder || listTags.size;
-  $("setListNote").textContent = filtered ? `${shown.length} / ${all.length} セット` : `${all.length} セット（最近練習した順）`;
+  $("setListNote").textContent = filtered ? `${shown.length} / ${all.length} セット` : `${all.length} セット`;
 }
 function openSetList() {
   if (running) return;
@@ -1691,10 +1699,10 @@ function stop() {
   $("startBtn").textContent = "再開"; $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setBtn").disabled = false;
   setStatus("一時停止中。再開すると今の文からやり直します。");
 }
-// The set after the current one: in the same folder, in the order they were made (back to the first after the last).
+// The set after the current one: in the same folder, in name order (back to the first after the last).
 function nextSet() {
   const cur = currentSet(); if (!cur) return null;
-  const pool = liveSets().filter(x => (x.folder || "") === (cur.folder || ""));
+  const pool = setsByName(liveSets().filter(x => (x.folder || "") === (cur.folder || "")));
   return pool.length > 1 ? pool[(pool.findIndex(x => x.id === cur.id) + 1) % pool.length] : null;
 }
 // Buttons on the results: [言えなかった文だけもう一度] (only with misses, first and full width), then
@@ -1827,6 +1835,7 @@ $("newSetBtn").onclick = addSet;
 $("delSetBtn").onclick = deleteSet;
 $("setBtn").onclick = openSetList;
 $("setCloseBtn").onclick = () => $("setDialog").close();
+$("setOrderBtn").onclick = () => { listOrder = listOrder === "name" ? "recent" : "name"; store.set("listOrder", listOrder); renderSetList(); };
 $("setSearch").addEventListener("input", renderSetList);
 // Enter picks the first hit. preventDefault: otherwise the Enter goes on to the set button (focused again on close) and reopens the list.
 $("setSearch").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("setList").querySelector("button")?.click(); } });
