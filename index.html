@@ -83,14 +83,15 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 /* Progress: a line along the top edge of the card, and "2 / 10" in its top-right corner. */
 .bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--line); }
 .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
-.card-count { position: absolute; top: 14px; right: 18px; font-size: 13px; color: var(--pending); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Floated, so only the first line of the translation makes room for it. */
+.card-count { float: right; margin-left: 12px; font-size: 13px; line-height: 1.5; color: var(--pending); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .stage { display: flex; flex-direction: column; gap: 18px; }
 .card {
   background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
   padding: 36px 28px; min-height: 200px; display: flex; flex-direction: column; justify-content: center; gap: 18px;
 }
-.ja { color: var(--pending); font-size: 14px; margin: 0; min-height: 1.4em; padding-right: 4.5em; /* room for the count */ }
+.ja { color: var(--pending); font-size: 14px; margin: 0; min-height: 1.4em; }
 .sentence {
   font-family: var(--font-say); font-size: clamp(24px, 5vw, 34px); line-height: 1.45; margin: 0;
   display: flex; flex-wrap: wrap; gap: 0.1em 0.32em; text-wrap: balance;
@@ -281,8 +282,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
   <main class="stage">
     <section class="card" id="card" aria-live="polite">
       <div class="bar" aria-hidden="true"><i id="bar"></i></div>
-      <span class="card-count" id="count">0 / 0</span>
-      <p class="ja" id="ja"></p>
+      <div><span class="card-count" id="count">0 / 0</span><p class="ja" id="ja"></p></div>
       <p class="sentence" id="sentence"></p>
       <p class="status" id="status"><span class="dot"></span><span class="heard" id="heard"></span><span id="statusText"></span></p>
       <span class="edge prev" id="edgePrev" aria-hidden="true">‹</span>
