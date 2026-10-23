@@ -104,6 +104,8 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 @media (prefers-reduced-motion: reduce) { .listening .dot { animation: none; } .w, .bar > i { transition: none; } }
 
 .controls { display: flex; gap: 10px; flex-wrap: wrap; }
+/* Results with missed sentences: "言えなかった文だけもう一度" comes first and stands out. */
+.controls.retry-first #retryBtn { order: -1; flex-basis: 100%; }
 .voice-bar, .set-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
 .voice-bar label, .set-bar label { color: var(--pending); min-width: 7.5em; }
 .voice-bar select, .set-bar select { flex: 1; min-width: 0; }
@@ -252,7 +254,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <section class="results" id="results" hidden></section>
   </main>
 
-  <div class="controls">
+  <div class="controls" id="controls">
     <button class="primary" id="startBtn" type="button">スタート</button>
     <button id="replayBtn" type="button" disabled>もう一度聞く</button>
     <button id="retryBtn" type="button" hidden>言えなかった文だけもう一度</button>
@@ -1108,6 +1110,7 @@ function loadList(indices) {
   if (!indices && $("shuffle").checked) order.sort(() => Math.random() - 0.5);
   pos = 0; results = [];
   $("results").hidden = true; $("retryBtn").hidden = true; $("homeBtn").hidden = true;
+  retryFirst(false);
   show();
 }
 function show() {
@@ -1686,6 +1689,12 @@ function stop() {
   $("startBtn").textContent = "再開"; $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setBtn").disabled = false;
   setStatus("一時停止中。再開すると今の文からやり直します。");
 }
+function retryFirst(on) {
+  $("controls").classList.toggle("retry-first", on);
+  $("replayBtn").hidden = on; // nothing to replay on the results
+  $("retryBtn").classList.toggle("primary", on);
+  $("startBtn").classList.toggle("primary", !on);
+}
 function finish() {
   stop();
   $("startBtn").textContent = "最初からもう一度";
@@ -1730,6 +1739,7 @@ function finish() {
   }));
   box.hidden = false;
   $("retryBtn").hidden = okCount === done.length;
+  retryFirst(okCount !== done.length);
   $("homeBtn").hidden = false;
 }
 // Back to the start screen without reloading: first sentence of the chosen set, ready to start.
