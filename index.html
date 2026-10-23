@@ -1508,8 +1508,11 @@ function listen() {
   }
   armGiveUp();
 }
+// Device voices: American and British English only. Others (Australia, India...) are often not downloaded
+// on an iPhone and then read nothing, with no error the app could notice.
+function deviceVoices() { return synth ? synth.getVoices().filter(v => /^en[-_](US|GB)\b/i.test(v.lang)) : []; }
 function deviceVoice() {
-  const en = synth ? synth.getVoices().filter(v => /^en[-_]/i.test(v.lang)) : [];
+  const en = deviceVoices();
   const want = voiceName.startsWith("d:") ? voiceName.slice(2) : "";
   const accent = voiceName.startsWith("g:") ? voiceName.slice(5, 7) : (NATURAL.find(n => "k:" + n[0] === voiceName) || [, , "en-US"])[2].slice(3);
   return en.find(v => v.name === want) || en.find(v => new RegExp("en[-_]" + accent, "i").test(v.lang)) || en[0] || null;
@@ -1866,14 +1869,16 @@ function fillVoices() {
     });
     return g;
   };
-  const en = synth ? synth.getVoices().filter(v => /^en[-_]/i.test(v.lang)) : [];
+  const en = deviceVoices();
   const groups = [group("自然な声", NATURAL.map(([id, name, lang, g]) => ["k:" + id, voiceLabel(name, lang, g)]))];
   const gv = store.get("gKey", "") ? gVoices() : [];
   if (gv.length) groups.unshift(group("Google の声", gv.map(v => ["g:" + v.name,
     voiceLabel(v.name.split("-").pop(), v.lang, v.gender === "FEMALE" ? "F" : v.gender === "MALE" ? "M" : "")])));
   if (en.length) groups.push(group("端末の声", en.map(v => ["d:" + v.name, voiceLabel(v.name, v.lang, "")])));
   $("voice").replaceChildren(...groups);
-  // A saved device voice that is not on this device: show the default natural voice instead.
+  // A saved device voice that is not in the list (another device, or a voice no longer listed): use the default natural voice.
+  // (An empty list may just mean the device voices have not loaded yet.)
+  if (voiceName.startsWith("d:") && en.length && !en.some(v => "d:" + v.name === voiceName)) { voiceName = "k:af_heart"; store.set("voice", voiceName); }
   if ($("voice").value !== voiceName && !(voiceName.startsWith("d:") && !en.length)) $("voice").value = voiceName;
 }
 $("voice").onchange = e => { voiceName = e.target.value; store.set("voice", voiceName); showUsage(); preview(); };
