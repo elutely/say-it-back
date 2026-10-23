@@ -177,6 +177,7 @@ button.icon-btn { padding: 0; width: 40px; height: 40px; display: inline-flex; a
 .set-list .meta { flex: none; font-size: 12px; color: var(--pending); font-weight: 400; font-variant-numeric: tabular-nums; }
 .sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .sheet-foot p { margin: 0 auto 0 0; font-size: 13px; color: var(--pending); }
+#setOrderBtn { margin-right: auto; }
 .sheet-foot button { padding: 8px 12px; font-size: 14px; }
 .toggles { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; margin-top: -8px; }
 .toggles label.toggle { min-width: 0; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
@@ -338,7 +339,6 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     </div>
     <ul class="set-list" id="setList"></ul>
     <div class="sheet-foot">
-      <p id="setListNote"></p>
       <button id="setOrderBtn" type="button"></button>
       <button class="icon-btn" id="setNewBtn" type="button" aria-label="新しいセット" title="新しいセット"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
     </div>
@@ -1063,8 +1063,6 @@ function renderSetList() {
     b.onclick = () => { $("setDialog").close(); if (x.id !== cur.id) chooseSet(x.id); };
     li.append(b); return li;
   }));
-  const filtered = q || listFolder || listTags.size;
-  $("setListNote").textContent = filtered ? `${shown.length} / ${all.length} セット` : `${all.length} セット`;
 }
 function openSetList() {
   if (running) return;
