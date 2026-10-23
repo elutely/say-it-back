@@ -91,7 +91,8 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
   background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
   padding: 36px 28px; min-height: 200px; display: flex; flex-direction: column; justify-content: center; gap: 18px;
 }
-.ja { color: var(--pending); font-size: 14px; margin: 0; min-height: 1.4em; }
+/* Room for 2 lines of the translation, so a 1-line (or empty) one does not shrink the card. */
+.ja { color: var(--pending); font-size: 14px; line-height: 1.5; margin: 0; min-height: 3em; }
 .sentence {
   font-family: var(--font-say); font-size: clamp(24px, 5vw, 34px); line-height: 1.45; margin: 0;
   display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0.1em 0.32em; text-wrap: balance;
