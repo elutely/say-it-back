@@ -103,9 +103,9 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .card { touch-action: pan-y; user-select: none; -webkit-user-select: none; transition: transform .18s ease, opacity .18s ease; }
 .card.dragging { transition: none; cursor: grabbing; }
 .card { position: relative; }
-/* Tap the left / right edge of the card to move; the arrows show where it can go. */
-.edge { position: absolute; top: 50%; transform: translateY(-50%); font-size: 26px; line-height: 1; color: var(--muted); pointer-events: none; transition: opacity .15s; }
-.edge.prev { left: 8px; } .edge.next { right: 8px; }
+/* Tap the top / bottom of the card to move back / forward; the arrows show where it can go. */
+.edge { position: absolute; left: 50%; transform: translateX(-50%) rotate(90deg); font-size: 26px; line-height: 1; color: var(--muted); pointer-events: none; transition: opacity .15s; }
+.edge.prev { top: 4px; } .edge.next { bottom: 4px; }
 .edge.off { opacity: 0; }
 /* The line at the bottom of the card: what was heard, or else the status message. */
 .status { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--pending); min-height: 24px; margin: 0; }
@@ -121,6 +121,7 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .controls { display: flex; gap: 10px; flex-wrap: wrap; }
 /* Results with missed sentences: "言えなかった文だけもう一度" comes first and stands out. */
 .controls.retry-first #retryBtn { order: -1; flex-basis: 100%; }
+.controls #startBtn { order: 1; } /* スタート / 一時停止 on the right */
 .controls #homeBtn, .controls #nextBtn { flex: 1; min-width: 0; }
 .voice-bar, .set-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
 .voice-bar label, .set-bar label { color: var(--pending); min-width: 7.5em; }
@@ -305,7 +306,6 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <select id="voice"></select>
     <button id="previewBtn" type="button">試聴</button>
     <p class="tts-note" id="ttsNote" hidden></p>
-    <p class="tts-note" id="gUsage" hidden></p>
   </div>
   <div class="voice-bar" id="rateBar">
     <label for="rate">読み上げの速さ <span id="rateVal"></span>倍</label>
@@ -315,6 +315,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <label for="boost">お手本の音量 <span id="boostVal"></span>倍<button class="help" type="button" data-help="boost" aria-label="お手本の音量の説明">?</button></label>
     <input type="range" id="boost" min="1" max="3" step="0.5">
   </div>
+  <p class="tts-note" id="gUsage" hidden></p>
 
   <dialog class="sheet" id="setDialog" aria-labelledby="setBtn">
     <div class="sheet-head">
@@ -807,7 +808,7 @@ function showUsage() {
     ? `Google の声：今月 ${used.toLocaleString()} / ${G_FREE_CHARS.toLocaleString()} 文字（無料であと 約${Math.floor(left / perSentence).toLocaleString()}文）`
     : `Google の声：今月 ${used.toLocaleString()} 文字。無料枠を超えています（超えた分 約${(-left * 0.00003).toFixed(2)}ドル）`;
   $("gUsage").textContent = short;
-  $("gUsage").hidden = !(on && voiceName.startsWith("g:"));
+  $("gUsage").hidden = !(on && ttsOn && voiceName.startsWith("g:"));
   $("gUsageFull").replaceChildren(short + "。このアプリで新しく作った分だけを数えています（保存済みの文の読み直しは無料なので数えません。同期していない端末やほかのアプリで使った分は入りません）。正確な数字は ",
     Object.assign(document.createElement("a"), { href: "https://console.cloud.google.com/billing", target: "_blank", rel: "noopener", textContent: "Google Cloud の「お支払い」→「レポート」" }), " で確認できます。");
   $("gUsageFull").hidden = !on;
@@ -1680,12 +1681,12 @@ function go(dir) {
   });
   const end = () => {
     if (!drag) return;
-    const { on, dx, x } = drag;
+    const { on, dx, y } = drag;
     drag = null;
     if (!on) {
-      // A tap: the outer quarter on each side moves back / forward.
-      const r = card.getBoundingClientRect(), edge = Math.max(56, r.width / 4);
-      if (x < r.left + edge) go(-1); else if (x > r.right - edge) go(1);
+      // A tap: the top part moves back, the bottom part forward (30% each, at least 44 px; the middle does nothing).
+      const r = card.getBoundingClientRect(), edge = Math.max(44, r.height * 0.3);
+      if (y < r.top + edge) go(-1); else if (y > r.bottom - edge) go(1);
       return;
     }
     card.classList.remove("dragging");
@@ -1852,7 +1853,7 @@ function preview() {
   say(items[order[pos]]?.en || "Hello! Let's practice speaking English.");
 }
 $("previewBtn").onclick = preview;
-function syncVoiceBar() { ["voiceBar", "rateBar", "boostBar"].forEach(id => { $(id).hidden = !ttsOn; }); }
+function syncVoiceBar() { ["voiceBar", "rateBar", "boostBar"].forEach(id => { $(id).hidden = !ttsOn; }); showUsage(); }
 // ---- Longer explanations, opened from the "?" buttons ----
 const HELP = {
   about: ["このアプリについて", `<p>表示された英文を声に出して言うと、言えた単語に色が付き、全部言えたら次の文に進む音読練習アプリです。</p>
