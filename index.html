@@ -155,8 +155,9 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .sheet-foot p { margin: 0 auto 0 0; font-size: 13px; color: var(--pending); }
 .sheet-foot button { padding: 8px 12px; font-size: 14px; }
-.set-bar label.hide-toggle { min-width: 0; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
-.hide-toggle input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
+.toggles { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; margin-top: -8px; }
+.toggles label.toggle { min-width: 0; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
+.toggle input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
 .set-name { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .set-name label { font-size: 13px; color: var(--pending); }
 .set-name input {
@@ -164,6 +165,19 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
   background: var(--bg); color: var(--ink);
 }
 .voice-bar button { padding: 8px 14px; font-size: 14px; }
+.voice-bar input[type=range] { flex: 1; min-width: 0; }
+/* "?" next to a label: opens the longer explanation in a dialog. */
+button.help {
+  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; margin-left: 4px;
+  border-radius: 50%; font-size: 12px; font-weight: 600; line-height: 1; color: var(--pending); background: var(--surface);
+  vertical-align: middle; flex: none;
+}
+.help-body { padding: 16px 18px; overflow-y: auto; font-size: 14px; line-height: 1.7; }
+.help-body h3 { margin: 0 0 8px; font-size: 16px; }
+.help-body p, .help-body ul { margin: 0 0 8px; }
+.help-body ul { padding-left: 1.3em; }
+.sheet-foot.end { justify-content: flex-end; }
+.hint:empty { display: none; }
 .tts-note { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--pending); font-variant-numeric: tabular-nums; }
 button {
   font: inherit; font-weight: 500; border-radius: 10px; padding: 12px 18px; cursor: pointer;
@@ -266,7 +280,10 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
   <div class="set-bar">
     <label for="setBtn">練習するセット</label>
     <button class="set-btn" id="setBtn" type="button" aria-haspopup="dialog"><span id="setBtnName"></span><span class="chev" aria-hidden="true">▾</span></button>
-    <label class="hide-toggle" id="hideToggle" hidden><input type="checkbox" id="hideOn"> 語句を隠す</label>
+  </div>
+  <div class="toggles">
+    <label class="toggle"><input type="checkbox" id="shuffle"> 順番をシャッフル</label>
+    <label class="toggle" id="hideToggle" hidden><input type="checkbox" id="hideOn"> 語句を隠す</label>
   </div>
 
   <div class="voice-bar" id="voiceBar">
@@ -275,6 +292,14 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <button id="previewBtn" type="button">試聴</button>
     <p class="tts-note" id="ttsNote" hidden></p>
     <p class="tts-note" id="gUsage" hidden></p>
+  </div>
+  <div class="voice-bar" id="rateBar">
+    <label for="rate">読み上げの速さ <span id="rateVal"></span>倍</label>
+    <input type="range" id="rate" min="0.6" max="1.2" step="0.1">
+  </div>
+  <div class="voice-bar" id="boostBar">
+    <label for="boost">お手本の音量 <span id="boostVal"></span>倍<button class="help" type="button" data-help="boost" aria-label="お手本の音量の説明">?</button></label>
+    <input type="range" id="boost" min="1" max="3" step="0.5">
   </div>
 
   <dialog class="sheet" id="setDialog" aria-labelledby="setBtn">
@@ -294,16 +319,20 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     </div>
   </dialog>
 
+  <dialog class="sheet" id="helpDialog" aria-labelledby="helpTitle">
+    <div class="help-body"><h3 id="helpTitle"></h3><div id="helpText"></div></div>
+    <div class="sheet-foot end"><button id="helpCloseBtn" type="button" autofocus>閉じる</button></div>
+  </dialog>
+
   <details id="settingsBox">
     <summary>英文リストと設定</summary>
     <div class="settings">
-      <p class="hint">英文のリストは「セット」ごとに名前を付けて、いくつでも保存できます。下で編集しているのは、最初の画面で選んでいるセットです。英文と和訳はそれぞれの欄に1行に1文ずつ入れ、同じ行どうしが組になります（和訳は空でも可）。「隠す語句」に英文の一部を入れると、カードではその部分が隠れ、言えたところから表示されます（判定のあとは全部表示）。1行に複数あるときは「,」で区切ります。辞書の形のままで大丈夫です（「get back to (sb)」の括弧の部分は隠さず、「look forward to」は looked なども、「make up one's mind」は my mind なども隠します）。</p>
       <div class="set-name">
-        <label for="setName">セット名</label>
+        <label for="setName">セット名<button class="help" type="button" data-help="sets" aria-label="セットの説明">?</button></label>
         <input id="setName" type="text" maxlength="40" placeholder="例：旅行の英会話">
       </div>
       <div class="set-name">
-        <label for="setFolder">フォルダ</label>
+        <label for="setFolder">フォルダ<button class="help" type="button" data-help="folders" aria-label="フォルダとタグの説明">?</button></label>
         <input id="setFolder" type="text" maxlength="30" placeholder="例：仕事（空なら入れない）" list="folderOptions" autocomplete="off">
         <datalist id="folderOptions"></datalist>
       </div>
@@ -313,7 +342,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       </div>
       <div class="boxes">
         <div class="box">
-          <label for="enBox">英文 <span id="enCount"></span></label>
+          <label for="enBox"><span>英文<button class="help" type="button" data-help="pairs" aria-label="英文と和訳の説明">?</button></span> <span id="enCount"></span></label>
           <textarea id="enBox" spellcheck="false" lang="en" placeholder="Could you say that again, please?"></textarea>
         </div>
         <div class="box">
@@ -321,7 +350,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
           <textarea id="jaBox" spellcheck="false" placeholder="もう一度言っていただけますか？"></textarea>
         </div>
         <div class="box">
-          <label for="hideBox">隠す語句 <span id="hideCount"></span></label>
+          <label for="hideBox"><span>隠す語句<button class="help" type="button" data-help="hide" aria-label="隠す語句の説明">?</button></span> <span id="hideCount"></span></label>
           <textarea id="hideBox" spellcheck="false" lang="en" placeholder="say that again, please"></textarea>
         </div>
       </div>
@@ -334,9 +363,10 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       <div class="row">
         <button id="exportBtn" type="button">すべてのセットを書き出す</button>
         <button id="importBtn" type="button">書き出したファイルを読み込む</button>
+        <button class="help" type="button" data-help="backup" aria-label="書き出し・読み込みの説明">?</button>
         <input type="file" id="importFile" accept=".json,application/json" hidden>
       </div>
-      <p class="hint" id="backupNote">書き出したファイルは、このブラウザのデータが消えたときの控えになります。読み込むと、同じセットは保存が新しい方が残り、ないセットは追加されます。</p>
+      <p class="hint" id="backupNote"></p>
       <div class="row">
         <label><input type="checkbox" id="tts"> お手本を読み上げてからリピート</label>
       </div>
@@ -344,20 +374,8 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
         <label><input type="checkbox" id="cue"> 話し始めていいタイミングで合図の音を鳴らす</label>
       </div>
       <div class="row">
-        <label for="rate">読み上げの速さ: <span id="rateVal"></span>倍</label>
-        <input type="range" id="rate" min="0.6" max="1.2" step="0.1">
-      </div>
-      <div class="row">
-        <label for="boost">お手本の音量: <span id="boostVal"></span>倍</label>
-        <input type="range" id="boost" min="1" max="3" step="0.5">
-      </div>
-      <p class="hint">iPhone ではマイクを使い始めると、お手本の声が小さくなることがあります。そのときは音量を上げてください（自然な声・Google の声に効きます。端末の声には効きません）。</p>
-      <div class="row">
         <label for="silence">言い終わりの判定（無音）: <span id="silenceVal"></span>秒</label>
         <input type="range" id="silence" min="1" max="4" step="0.5">
-      </div>
-      <div class="row">
-        <label><input type="checkbox" id="shuffle"> 順番をシャッフル</label>
       </div>
       <section class="sync" aria-labelledby="gTitle">
         <h3 id="gTitle">Google の自然な声（任意）</h3>
@@ -400,15 +418,14 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
         <p class="sync-state" id="syncState">同期していません。記録と英文リストはこのブラウザの中だけに保存されています。</p>
       </section>
       <section class="sync" aria-labelledby="diagTitle">
-        <h3 id="diagTitle">診断ログ</h3>
-        <p class="hint">お手本が鳴らないなどの不具合を調べるための記録です（この端末の中だけ、同期しません）。</p>
+        <h3 id="diagTitle">診断ログ<button class="help" type="button" data-help="diag" aria-label="診断ログの説明">?</button></h3>
         <div class="row">
           <button id="diagCopyBtn" type="button">コピー</button>
           <button id="diagClearBtn" type="button">消す</button>
         </div>
         <pre class="diag" id="diag"></pre>
       </section>
-      <p class="hint">PC の Chrome 向けに作っています。Safari（iPhone）も音声認識に対応していますが、途中で聞き取りが止まることがあります。Firefox は非対応。音声認識はブラウザの機能を使うため、オンラインで使ってください。ファイルを直接開くと、文ごとにマイクの許可を聞かれます。URL（https か localhost）で開くと許可が記憶されます。</p>
+      <p class="hint">このアプリについて<button class="help" type="button" data-help="about" aria-label="このアプリの説明">?</button></p>
     </div>
   </details>
 </div>
@@ -1821,7 +1838,41 @@ function preview() {
   say(items[order[pos]]?.en || "Hello! Let's practice speaking English.");
 }
 $("previewBtn").onclick = preview;
-function syncVoiceBar() { $("voiceBar").hidden = !ttsOn; }
+function syncVoiceBar() { ["voiceBar", "rateBar", "boostBar"].forEach(id => { $(id).hidden = !ttsOn; }); }
+// ---- Longer explanations, opened from the "?" buttons ----
+const HELP = {
+  about: ["このアプリについて", `<p>表示された英文を声に出して言うと、言えた単語に色が付き、全部言えたら次の文に進む音読練習アプリです。</p>
+    <ul><li>PC の Chrome 向けに作っています。Safari（iPhone）も音声認識に対応していますが、途中で聞き取りが止まることがあります。Firefox は非対応です。</li>
+    <li>音声認識はブラウザの機能を使うため、オンラインで使ってください。</li>
+    <li>ファイルを直接開くと、文ごとにマイクの許可を聞かれます。URL（https か localhost）で開くと許可が記憶されます。</li></ul>`],
+  sets: ["セット", `<p>英文のリストは「セット」ごとに名前を付けて、いくつでも保存できます。</p>
+    <p>ここで編集しているのは、最初の画面の「練習するセット」で選んでいるセットです。編集したら「このセットを保存」を押してください。</p>`],
+  folders: ["フォルダとタグ", `<p>セットが増えたときの整理用です。セット一覧の上にボタンが出て、絞り込めます。</p>
+    <ul><li>フォルダ：1つのセットに1つ。空なら入れません。「次のセットへ」は同じフォルダの中で名前順に進みます。</li>
+    <li>タグ：いくつでも。「,」で区切ります。複数選ぶと、全部を持つセットだけが出ます。</li></ul>`],
+  pairs: ["英文と和訳", `<p>英文と和訳はそれぞれの欄に1行に1文ずつ入れ、同じ行どうしが組になります（和訳は空でも可）。</p>`],
+  hide: ["隠す語句", `<p>英文の一部を入れると、カードではその部分が隠れ、言えたところから表示されます。判定のあとは全部表示されます。</p>
+    <ul><li>英文と同じ行に入れます。1行に複数あるときは「,」で区切ります。</li>
+    <li>辞書の形のままで大丈夫です。「get back to (sb)」の括弧の部分は隠さず、「look forward to」は looked なども、「make up one's mind」は my mind なども隠します。</li>
+    <li>最初の画面の「語句を隠す」で、隠すかどうかを切り替えられます。</li></ul>`],
+  boost: ["お手本の音量", `<p>iPhone ではマイクを使い始めると、お手本の声が小さくなることがあります。そのときは音量を上げてください。</p>
+    <p>自然な声・Google の声に効きます。端末の声には効きません。</p>`],
+  backup: ["書き出し・読み込み", `<p>「すべてのセットを書き出す」で、全セットを1つのファイルに保存します。このブラウザのデータが消えたときの控えになります。</p>
+    <p>読み込むと、同じセットは保存が新しい方が残り、ないセットは追加されます。</p>`],
+  diag: ["診断ログ", `<p>お手本が鳴らないなどの不具合を調べるための記録です。この端末の中だけに残り、同期しません。</p>
+    <p>不具合があったら「コピー」を押して、内容を伝えてください。</p>`]
+};
+document.addEventListener("click", e => {
+  const b = e.target.closest("button.help");
+  if (!b) return;
+  e.preventDefault(); // inside a label: do not move the focus to its field
+  const [title, html] = HELP[b.dataset.help];
+  $("helpTitle").textContent = title;
+  $("helpText").innerHTML = html; // fixed text from HELP above
+  $("helpDialog").showModal();
+});
+$("helpCloseBtn").onclick = () => $("helpDialog").close();
+$("helpDialog").addEventListener("click", e => { if (e.target === $("helpDialog")) $("helpDialog").close(); });
 fillVoices();
 synth?.addEventListener?.("voiceschanged", fillVoices);
 syncVoiceBar();
