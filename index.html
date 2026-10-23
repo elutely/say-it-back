@@ -106,6 +106,7 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .controls { display: flex; gap: 10px; flex-wrap: wrap; }
 /* Results with missed sentences: "言えなかった文だけもう一度" comes first and stands out. */
 .controls.retry-first #retryBtn { order: -1; flex-basis: 100%; }
+.controls #homeBtn, .controls #nextBtn { flex: 1; min-width: 0; }
 .voice-bar, .set-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
 .voice-bar label, .set-bar label { color: var(--pending); min-width: 7.5em; }
 .voice-bar select, .set-bar select { flex: 1; min-width: 0; }
@@ -259,6 +260,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <button id="replayBtn" type="button" disabled>もう一度聞く</button>
     <button id="retryBtn" type="button" hidden>言えなかった文だけもう一度</button>
     <button id="homeBtn" type="button" hidden>最初の画面に戻る</button>
+    <button id="nextBtn" type="button" hidden>次のセットへ</button>
   </div>
 
   <div class="set-bar">
@@ -1109,8 +1111,8 @@ function loadList(indices) {
   order = indices || items.map((_, i) => i);
   if (!indices && $("shuffle").checked) order.sort(() => Math.random() - 0.5);
   pos = 0; results = [];
-  $("results").hidden = true; $("retryBtn").hidden = true; $("homeBtn").hidden = true;
-  retryFirst(false);
+  $("results").hidden = true;
+  resultButtons(false);
   show();
 }
 function show() {
@@ -1689,15 +1691,30 @@ function stop() {
   $("startBtn").textContent = "再開"; $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setBtn").disabled = false;
   setStatus("一時停止中。再開すると今の文からやり直します。");
 }
-function retryFirst(on) {
-  $("controls").classList.toggle("retry-first", on);
+// The set after the current one: in the same folder, in the order they were made (back to the first after the last).
+function nextSet() {
+  const cur = currentSet(); if (!cur) return null;
+  const pool = liveSets().filter(x => (x.folder || "") === (cur.folder || ""));
+  return pool.length > 1 ? pool[(pool.findIndex(x => x.id === cur.id) + 1) % pool.length] : null;
+}
+// Buttons on the results: [言えなかった文だけもう一度] (only with misses, first and full width), then
+// [最初の画面に戻る] [次のセットへ]. The one to press next stands out. Practicing / the start screen: スタート etc. as usual.
+function resultButtons(on, missed) {
+  const next = on ? nextSet() : null;
+  $("controls").classList.toggle("retry-first", on && missed);
+  $("startBtn").hidden = on;
   $("replayBtn").hidden = on; // nothing to replay on the results
-  $("retryBtn").classList.toggle("primary", on);
+  $("retryBtn").hidden = !(on && missed);
+  $("homeBtn").hidden = !on;
+  $("nextBtn").hidden = !next;
+  if (next) { $("nextBtn").dataset.id = next.id; $("nextBtn").title = next.name; $("nextBtn").setAttribute("aria-label", `次のセットへ（${next.name}）`); }
   $("startBtn").classList.toggle("primary", !on);
+  $("retryBtn").classList.toggle("primary", on && missed);
+  $("nextBtn").classList.toggle("primary", on && !missed && !!next);
+  $("homeBtn").classList.toggle("primary", on && !missed && !next);
 }
 function finish() {
   stop();
-  $("startBtn").textContent = "最初からもう一度";
   $("bar").style.width = "100%";
   const done = results.filter(Boolean);
   const okCount = done.filter(r => r.ok).length;
@@ -1738,9 +1755,7 @@ function finish() {
     row.append(b, span); return row;
   }));
   box.hidden = false;
-  $("retryBtn").hidden = okCount === done.length;
-  retryFirst(okCount !== done.length);
-  $("homeBtn").hidden = false;
+  resultButtons(true, okCount !== done.length);
 }
 // Back to the start screen without reloading: first sentence of the chosen set, ready to start.
 function goHome() {
@@ -1822,6 +1837,7 @@ $("exportBtn").onclick = exportSets;
 $("importBtn").onclick = () => $("importFile").click();
 $("importFile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) importSets(f); };
 $("homeBtn").onclick = goHome;
+$("nextBtn").onclick = () => chooseSet($("nextBtn").dataset.id);
 $("silence").value = silenceSec; $("silenceVal").textContent = silenceSec;
 $("silence").oninput = e => { silenceSec = parseFloat(e.target.value); $("silenceVal").textContent = silenceSec; store.set("silence", silenceSec); };
 $("shuffle").checked = store.get("shuffle", "0") === "1";
