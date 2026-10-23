@@ -198,6 +198,10 @@ button.icon-btn { padding: 0; width: 40px; height: 40px; display: inline-flex; a
 }
 .voice-bar button { padding: 8px 14px; font-size: 14px; }
 .voice-bar input[type=range] { flex: 1; min-width: 0; }
+/* Google voice: how much of this month's free characters is left (the numbers are in the settings). */
+.quota { flex: 1; min-width: 0; height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.quota > i { display: block; height: 100%; width: 0; border-radius: 99px; background: var(--accent); transition: width .3s; }
+.quota.low > i { background: var(--warn); }
 /* "?" next to a label: opens the longer explanation in a dialog. */
 button.help {
   display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; margin-left: 4px;
@@ -330,7 +334,10 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
     <label for="boost">お手本の音量 <span id="boostVal"></span>倍<button class="help" type="button" data-help="boost" aria-label="お手本の音量の説明">?</button></label>
     <input type="range" id="boost" min="1" max="3" step="0.5">
   </div>
-  <p class="tts-note" id="gUsage" hidden></p>
+  <div class="voice-bar" id="gUsage" hidden>
+    <label>Google の無料枠</label>
+    <div class="quota" id="gQuota" role="meter" aria-valuemin="0" aria-valuemax="100" aria-label="Google の声の無料枠の残り"><i id="gQuotaFill"></i></div>
+  </div>
 
   <dialog class="sheet" id="setDialog" aria-labelledby="setBtn">
     <div class="sheet-head">
@@ -824,7 +831,12 @@ function showUsage() {
   const short = left > 0
     ? `Google の声：今月 ${used.toLocaleString()} / ${G_FREE_CHARS.toLocaleString()} 文字（無料であと 約${Math.floor(left / perSentence).toLocaleString()}文）`
     : `Google の声：今月 ${used.toLocaleString()} 文字。無料枠を超えています（超えた分 約${(-left * 0.00003).toFixed(2)}ドル）`;
-  $("gUsage").textContent = short;
+  // The bar: share of the free characters left this month (orange under 10%, empty once over).
+  const share = Math.max(0, left / G_FREE_CHARS);
+  $("gQuotaFill").style.width = (share * 100).toFixed(1) + "%";
+  $("gQuota").classList.toggle("low", share < 0.1);
+  $("gQuota").setAttribute("aria-valuenow", Math.round(share * 100));
+  $("gQuota").title = short;
   $("gUsage").hidden = !(on && ttsOn && voiceName.startsWith("g:"));
   $("gUsageFull").replaceChildren(short + "。このアプリで新しく作った分だけを数えています（保存済みの文の読み直しは無料なので数えません。同期していない端末やほかのアプリで使った分は入りません）。正確な数字は ",
     Object.assign(document.createElement("a"), { href: "https://console.cloud.google.com/billing", target: "_blank", rel: "noopener", textContent: "Google Cloud の「お支払い」→「レポート」" }), " で確認できます。");
