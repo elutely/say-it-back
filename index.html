@@ -642,9 +642,9 @@ if (voiceName.startsWith("g:") && !store.get("gKey", "")) voiceName = "k:af_hear
 const synth = window.speechSynthesis;
 let currentUtterance = null, noStartTimer = null, ttsUnlocked = false, cancelledAt = -1e9;
 const NATURAL = [
-  ["af_heart", "Heart（アメリカ・女性）", "en-US"],
-  ["am_michael", "Michael（アメリカ・男性）", "en-US"],
-  ["bf_emma", "Emma（イギリス・女性）", "en-GB"]
+  ["af_heart", "Heart", "en-US", "F"],
+  ["am_michael", "Michael", "en-US", "M"],
+  ["bf_emma", "Emma", "en-GB", "F"]
 ];
 // Pre-made audio for the sample sentences. A missing manifest (e.g. the file opened on its own) just means none.
 let manifest = {};
@@ -1846,6 +1846,15 @@ $("rate").value = rate; $("rateVal").textContent = rate;
 $("rate").oninput = e => { rate = parseFloat(e.target.value); $("rateVal").textContent = rate; store.set("rate", rate); };
 $("boost").value = boost; $("boostVal").textContent = boost;
 $("boost").oninput = e => { boost = parseFloat(e.target.value); $("boostVal").textContent = boost; store.set("boost", boost); if (boostGain) boostGain.gain.value = boost; };
+// A short label for the voice menu: name, the country's flag, ♀ / ♂ (e.g. "Heart 🇺🇸 ♀").
+// Where the device has no flag emoji (Windows), the flag shows as its letters, e.g. "US".
+function flag(lang) {
+  const cc = (lang || "").split(/[-_]/)[1]?.toUpperCase();
+  return cc && /^[A-Z]{2}$/.test(cc) ? String.fromCodePoint(...[...cc].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : "";
+}
+function voiceLabel(name, lang, gender) {
+  return [name, flag(lang), gender === "F" ? "♀" : gender === "M" ? "♂" : ""].filter(Boolean).join(" ");
+}
 function fillVoices() {
   const group = (label, opts) => {
     const g = document.createElement("optgroup"); g.label = label;
@@ -1856,11 +1865,11 @@ function fillVoices() {
     return g;
   };
   const en = synth ? synth.getVoices().filter(v => /^en[-_]/i.test(v.lang)) : [];
-  const groups = [group("自然な声", NATURAL.map(([id, label]) => ["k:" + id, label]))];
+  const groups = [group("自然な声", NATURAL.map(([id, name, lang, g]) => ["k:" + id, voiceLabel(name, lang, g)]))];
   const gv = store.get("gKey", "") ? gVoices() : [];
   if (gv.length) groups.unshift(group("Google の声", gv.map(v => ["g:" + v.name,
-    `${v.name.split("-").pop()}（${v.lang === "en-US" ? "アメリカ" : "イギリス"}・${v.gender === "FEMALE" ? "女性" : v.gender === "MALE" ? "男性" : "—"}）`])));
-  if (en.length) groups.push(group("端末の声", en.map(v => ["d:" + v.name, `${v.name} (${v.lang})`])));
+    voiceLabel(v.name.split("-").pop(), v.lang, v.gender === "FEMALE" ? "F" : v.gender === "MALE" ? "M" : "")])));
+  if (en.length) groups.push(group("端末の声", en.map(v => ["d:" + v.name, voiceLabel(v.name, v.lang, "")])));
   $("voice").replaceChildren(...groups);
   // A saved device voice that is not on this device: show the default natural voice instead.
   if ($("voice").value !== voiceName && !(voiceName.startsWith("d:") && !en.length)) $("voice").value = voiceName;
