@@ -269,6 +269,9 @@ summary { cursor: pointer; font-weight: 500; }
 .sync-state.bad { color: var(--warn); }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .row label { font-size: 14px; }
+.row button.wide { flex: 1; }
+/* Delete: a quiet text link under the backup buttons, so it is not pressed by mistake. */
+button.link-btn { padding: 4px 0; border: none; background: none; color: var(--warn); font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
 input[type=range] { accent-color: var(--accent); }
 select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); max-width: 100%; min-width: 0; }
 
@@ -407,17 +410,17 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
       </div>
       <p class="mismatch" id="mismatch" hidden></p>
       <div class="row">
-        <button id="saveBtn" type="button" data-tk="save"></button>
+        <button class="wide" id="saveBtn" type="button" data-tk="save"></button>
         <button id="newSetBtn" type="button" data-tk="newSet"></button>
       </div>
       <div class="row">
-        <button id="delSetBtn" type="button" data-tk="del"></button>
         <button id="exportBtn" type="button" data-tk="export"></button>
         <button id="importBtn" type="button" data-tk="import"></button>
         <button class="help" type="button" data-help="backup" data-tk-aria="backupHelp">?</button>
         <input type="file" id="importFile" accept=".json,application/json" hidden>
       </div>
       <p class="hint" id="backupNote"></p>
+      <div><button class="link-btn" id="delSetBtn" type="button" data-tk="del"></button></div>
     </div>
   </details>
 
