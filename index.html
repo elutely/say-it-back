@@ -212,7 +212,6 @@ button.icon-btn { padding: 0; width: 40px; height: 40px; display: inline-flex; a
   background: var(--bg); color: var(--ink);
 }
 .voice-bar button { padding: 8px 14px; font-size: 14px; }
-.voice-bar button.icon-btn { padding: 0; width: 38px; height: 38px; }
 .voice-bar input[type=range] { flex: 1; min-width: 0; }
 /* Google voice: how much of this month's free characters is left (the numbers are in the settings). */
 .quota { flex: 1; min-width: 0; height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
@@ -256,6 +255,7 @@ summary { cursor: pointer; font-weight: 500; }
 .mismatch { color: var(--warn); font-size: 13px; margin: 0; }
 @media (max-width: 560px) { .boxes { grid-template-columns: minmax(0, 1fr); } .box textarea { min-height: 160px; } }
 .hint { font-size: 13px; color: var(--pending); margin: 0; line-height: 1.6; }
+.hint.about { text-align: center; }
 .sync { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .sync h3 { font-size: 14px; margin: 0; }
 .sync ol { margin: 0; padding-left: 1.4em; font-size: 13px; color: var(--pending); line-height: 1.7; }
@@ -320,7 +320,7 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
 
   <div class="controls" id="controls">
     <button class="primary" id="startBtn" type="button">START</button>
-    <button id="replayBtn" type="button" disabled data-tk-aria="replay" data-tk-title="replay"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg></button>
+    <button id="replayBtn" type="button" data-tk-aria="replay" data-tk-title="replay"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg></button>
     <button id="retryBtn" type="button" hidden data-tk="retry"></button>
     <button id="homeBtn" type="button" hidden data-tk="home"></button>
     <button id="nextBtn" type="button" hidden data-tk="nextSet"></button>
@@ -338,7 +338,6 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
   <div class="voice-bar" id="voiceBar">
     <label for="voice" data-tk="voice"></label>
     <select id="voice"></select>
-    <button class="icon-btn" id="previewBtn" type="button" data-tk-aria="preview" data-tk-title="preview"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
     <p class="tts-note" id="ttsNote" hidden></p>
   </div>
   <div class="voice-bar" id="rateBar">
@@ -482,9 +481,9 @@ select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; 
         </div>
         <pre class="diag" id="diag"></pre>
       </section>
-      <p class="hint"><span data-tk="about"></span><button class="help" type="button" data-help="about" data-tk-aria="about">?</button></p>
     </div>
   </details>
+  <p class="hint about"><span data-tk="about"></span><button class="help" type="button" data-help="about" data-tk-aria="about">?</button></p>
 </div>
 
 <script>
@@ -658,7 +657,7 @@ const L = {
     replay: "もう一度聞く", retry: "言えなかった文だけもう一度", home: "最初に戻る",
     nextSet: "次のセットへ", nextSetAria: n => `次のセットへ（${n}）`, pause: "一時停止", resume: "再開",
     practiceSet: "練習するセット", shuffle: "順番をシャッフル", hideOn: "語句を隠す",
-    voice: "読み上げ音声", preview: "試聴", rate: "読み上げの速さ", boost: "お手本の音量", times: "倍",
+    voice: "読み上げ音声", rate: "読み上げの速さ", boost: "お手本の音量", times: "倍",
     boostHelp: "お手本の音量の説明", gFree: "Google の無料枠", gFreeAria: "Google の声の無料枠の残り",
     vNatural: "自然な声", vGoogle: "Google の声", vDevice: "端末の声",
     search: "名前・フォルダ・タグで探す", close: "閉じる", newSetIcon: "新しいセット",
@@ -743,7 +742,7 @@ const L = {
     replay: "Listen again", retry: "Retry the missed sentences", home: "Back to start",
     nextSet: "Next set", nextSetAria: n => `Next set (${n})`, pause: "Pause", resume: "Resume",
     practiceSet: "Practice set", shuffle: "Shuffle", hideOn: "Hide phrases",
-    voice: "Voice", preview: "Preview", rate: "Speed", boost: "Model volume", times: "×",
+    voice: "Voice", rate: "Speed", boost: "Model volume", times: "×",
     boostHelp: "About the model volume", gFree: "Google free tier", gFreeAria: "Google voice free tier left",
     vNatural: "Natural voices", vGoogle: "Google voices", vDevice: "Device voices",
     search: "Search by name, folder or tag", close: "Close", newSetIcon: "New set",
@@ -2012,7 +2011,7 @@ async function start() {
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
   if (pos >= order.length || !$("results").hidden) loadList();
   running = true;
-  startLabel("pause"); $("previewBtn").disabled = true; $("setBtn").disabled = true;
+  startLabel("pause"); $("setBtn").disabled = true;
   $("listBox").open = false; $("settingsBox").open = false;
   show();
   begin();
@@ -2024,7 +2023,7 @@ function stop() {
   endModel();
   stopRec();
   try { wakeLock?.release(); } catch {}
-  startLabel("resume"); $("replayBtn").disabled = true; $("previewBtn").disabled = false; $("setBtn").disabled = false;
+  startLabel("resume"); $("replayBtn").disabled = !ttsOn; $("setBtn").disabled = false;
   setStatus("paused");
 }
 // The set after the current one: in the same folder, in name order (back to the first after the last).
@@ -2114,7 +2113,8 @@ function goHome() {
 function showError(m) { put($("error"), m); $("error").hidden = false; }
 
 $("startBtn").onclick = () => running ? stop() : start();
-$("replayBtn").onclick = replay;
+// ↻: while practicing, the model again and then listen; before starting or while paused, only a preview of the voice.
+$("replayBtn").onclick = () => running ? replay() : preview();
 $("cue").checked = cueOn;
 $("cue").onchange = e => { cueOn = e.target.checked; store.set("cue", cueOn ? "1" : "0"); };
 $("hideOn").checked = hideOn;
@@ -2125,7 +2125,8 @@ $("hideOn").onchange = e => {
   if (item && $("results").hidden) { hidden = hideOn ? hiddenWords(words, item.hide) : words.map(() => false); paint(judged); }
 };
 $("tts").checked = ttsOn;
-$("tts").onchange = e => { ttsOn = e.target.checked; store.set("tts", ttsOn ? "1" : "0"); syncVoiceBar(); };
+$("tts").onchange = e => { ttsOn = e.target.checked; store.set("tts", ttsOn ? "1" : "0"); syncVoiceBar(); if (!running) $("replayBtn").disabled = !ttsOn; };
+$("replayBtn").disabled = !ttsOn;
 $("rate").value = rate; $("rateVal").textContent = rate;
 $("rate").oninput = e => { rate = parseFloat(e.target.value); $("rateVal").textContent = rate; store.set("rate", rate); };
 $("boost").value = boost; $("boostVal").textContent = boost;
@@ -2168,7 +2169,6 @@ function preview() {
   ensureAudioCtx(); applyBoost();
   say(items[order[pos]]?.en || "Hello! Let's practice speaking English.");
 }
-$("previewBtn").onclick = preview;
 function syncVoiceBar() { ["voiceBar", "rateBar", "boostBar"].forEach(id => { $(id).hidden = !ttsOn; }); showUsage(); }
 document.addEventListener("click", e => {
   const b = e.target.closest("button.help");
