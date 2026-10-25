@@ -118,6 +118,8 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 .w.hit { color: var(--ink); border-bottom-color: var(--accent); }
 .w.miss { color: var(--muted); }
 /* A hidden word keeps its place (and length) but not its letters, until it is said or the sentence is judged. */
+/* A phrase to hide, once shown (said, judged, or hiding turned off): a light highlighter band, so it is still told apart. */
+.w.tgt { background: var(--accent-soft); border-radius: 6px; }
 .w.hide { color: transparent; background: var(--line); border-radius: 6px; border-bottom-color: transparent; }
 .card.ok { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .card { touch-action: pan-y; user-select: none; -webkit-user-select: none; transition: transform .18s ease, opacity .18s ease; }
@@ -1458,12 +1460,13 @@ function show() {
   $("ja").textContent = item.ja;
   words = item.en.split(/\s+/);
   hits = words.map(() => false);
-  hidden = hideOn ? hiddenWords(words, item.hide) : words.map(() => false);
+  const tgt = hiddenWords(words, item.hide);
+  hidden = hideOn ? tgt : words.map(() => false);
   judged = false;
   completing = false;
   lastHeard = "";
   $("sentence").replaceChildren(...words.map((w, i) => {
-    const s = document.createElement("span"); s.className = hidden[i] ? "w hide" : "w"; s.textContent = w; return s;
+    const s = document.createElement("span"); s.className = "w" + (tgt[i] ? " tgt" : "") + (hidden[i] ? " hide" : ""); s.textContent = w; return s;
   }));
 }
 function paint(final) {
@@ -2205,7 +2208,8 @@ $("exportBtn").onclick = exportSets;
 $("importBtn").onclick = () => $("importFile").click();
 $("importFile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) importSets(f); };
 $("homeBtn").onclick = goHome;
-$("nextBtn").onclick = () => chooseSet($("nextBtn").dataset.id);
+// The next set starts at once (the tap also unlocks the sound, like the start button).
+$("nextBtn").onclick = () => { chooseSet($("nextBtn").dataset.id); start(); };
 $("silence").value = silenceSec; $("silenceVal").textContent = silenceSec;
 $("silence").oninput = e => { silenceSec = parseFloat(e.target.value); $("silenceVal").textContent = silenceSec; store.set("silence", silenceSec); };
 $("shuffle").checked = store.get("shuffle", "0") === "1";
