@@ -142,13 +142,15 @@ h1 { font-family: var(--font-say); font-weight: 600; font-size: 20px; margin: 0;
 
 .controls { display: flex; gap: 10px; flex-wrap: wrap; }
 /* Results with missed sentences: "言えなかった文だけもう一度" comes first and stands out. */
-.controls.retry-first #retryBtn { order: -1; flex-basis: 100%; }
+/* Results: the button to press next is big, first and full width; the others share the row under it. */
+.controls #retryBtn { order: 1; }
 .controls #startBtn { order: 1; display: inline-flex; align-items: center; justify-content: center; }
 #startBtn .ico { width: 26px; height: 26px; }
 #startBtn { letter-spacing: .06em; }
 #replayBtn { display: inline-flex; align-items: center; justify-content: center; min-width: 64px; }
 #replayBtn .ico { width: 26px; height: 26px; } /* スタート / 一時停止 on the right */
-.controls #homeBtn, .controls #nextBtn { flex: 1; min-width: 0; }
+.controls #homeBtn, .controls #nextBtn, .controls #retryBtn { flex: 1; min-width: 0; }
+.controls #homeBtn.big, .controls #nextBtn.big, .controls #retryBtn.big { order: -1; flex-basis: 100%; }
 .voice-bar, .set-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
 .voice-bar label, .set-bar label { color: var(--pending); min-width: 7.5em; }
 .voice-bar select, .set-bar select { flex: 1; min-width: 0; }
@@ -656,7 +658,7 @@ const L = {
     streakNone: "今日練習すると連続記録が始まります",
     streakHint: n => `今日練習すると${n}日連続になります。`,
     soundHint: "お手本が鳴らないときは ↻（もう一度聞く）を押してください（イヤホンをつないだあとなど）。",
-    replay: "もう一度聞く", retry: "言えなかった文だけもう一度", home: "最初に戻る",
+    replay: "もう一度聞く", retry: "ミスだけもう一度", home: "最初に戻る",
     nextSet: "次のセットへ", nextSetAria: n => `次のセットへ（${n}）`, pause: "一時停止", resume: "再開",
     practiceSet: "練習するセット", shuffle: "順番をシャッフル", hideOn: "語句を隠す",
     voice: "読み上げ音声", rate: "読み上げの速さ", boost: "お手本の音量", times: "倍",
@@ -741,7 +743,7 @@ const L = {
     streakNone: "Practice today to start a streak",
     streakHint: n => `Practice today for a ${n}-day streak.`,
     soundHint: "If you can't hear the model voice, press ↻ (Listen again), e.g. after plugging in earphones.",
-    replay: "Listen again", retry: "Retry the missed sentences", home: "Back to start",
+    replay: "Listen again", retry: "Retry misses", home: "Back to start",
     nextSet: "Next set", nextSetAria: n => `Next set (${n})`, pause: "Pause", resume: "Resume",
     practiceSet: "Practice set", shuffle: "Shuffle", hideOn: "Hide phrases",
     voice: "Voice", rate: "Speed", boost: "Model volume", times: "×",
@@ -2035,21 +2037,21 @@ function nextSet() {
   const pool = setsByName(liveSets().filter(x => (x.folder || "") === (cur.folder || "")));
   return pool.length > 1 ? pool[(pool.findIndex(x => x.id === cur.id) + 1) % pool.length] : null;
 }
-// Buttons on the results: [言えなかった文だけもう一度] (only with misses, first and full width), then
-// [最初に戻る] [次のセットへ]. The one to press next stands out. Practicing / the start screen: スタート etc. as usual.
+// Buttons on the results: [次のセットへ] big, first and full width (when there is another set in the folder), then
+// [最初に戻る] [ミスだけもう一度] (only with misses). Without a next set, the misses (or 最初に戻る) take the big place.
+// Practicing / the start screen: スタート etc. as usual.
 function resultButtons(on, missed) {
   const next = on ? nextSet() : null;
-  $("controls").classList.toggle("retry-first", on && missed);
   $("startBtn").hidden = on;
   $("replayBtn").hidden = on; // nothing to replay on the results
   $("retryBtn").hidden = !(on && missed);
   $("homeBtn").hidden = !on;
   $("nextBtn").hidden = !next;
   if (next) { $("nextBtn").dataset.id = next.id; $("nextBtn").title = next.name; $("nextBtn").setAttribute("aria-label", t("nextSetAria", next.name)); }
+  // The big one: the next set if there is one, else the missed sentences, else back to the start.
+  const big = !on ? null : next ? "nextBtn" : missed ? "retryBtn" : "homeBtn";
   $("startBtn").classList.toggle("primary", !on);
-  $("retryBtn").classList.toggle("primary", on && missed);
-  $("nextBtn").classList.toggle("primary", on && !missed && !!next);
-  $("homeBtn").classList.toggle("primary", on && !missed && !next);
+  ["retryBtn", "homeBtn", "nextBtn"].forEach(id => { $(id).classList.toggle("primary", id === big); $(id).classList.toggle("big", id === big); });
 }
 function finish() {
   stop();
