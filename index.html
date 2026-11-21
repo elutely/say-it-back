@@ -1149,7 +1149,7 @@ let diagLines = (() => { try { return JSON.parse(store.get("diag", "[]")) || [];
 function dlog(msg) {
   const d = new Date();
   diagLines.push(`${d.toTimeString().slice(0, 8)}.${String(d.getMilliseconds()).padStart(3, "0")} ${msg}`);
-  diagLines = diagLines.slice(-120);
+  diagLines = diagLines.slice(-200);
   store.set("diag", JSON.stringify(diagLines));
   const el = document.getElementById("diag");
   if (el) el.textContent = diagLines.join("\n");
@@ -2024,6 +2024,7 @@ document.addEventListener("keydown", e => {
 async function start() {
   $("error").hidden = true;
   if (!Rec) { showError("noRec"); return; }
+  dlog(`start: voice ${voiceName}, volume ${boost}x, model ${ttsOn ? "on" : "off"}`); logDevices("devices");
   unlockAudio(true);
   await ensureAudioCtx();
   applyBoost();
@@ -2231,7 +2232,15 @@ $("silence").oninput = e => { silenceSec = parseFloat(e.target.value); $("silenc
 $("shuffle").checked = store.get("shuffle", "0") === "1";
 $("shuffle").onchange = e => store.set("shuffle", e.target.checked ? "1" : "0");
 document.addEventListener("visibilitychange", () => { dlog("visibility " + document.visibilityState); if (document.hidden && running) stop(); });
-navigator.mediaDevices?.addEventListener?.("devicechange", () => dlog("devicechange"));
+// Which audio devices the browser sees (names only appear once the mic has been allowed): to tell whether a plugged-in
+// earphone is seen at all, and whether it keeps coming and going.
+async function logDevices(why) {
+  try {
+    const ds = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind.startsWith("audio"));
+    dlog(`${why}: ` + (ds.map(d => `${d.kind === "audioinput" ? "in" : "out"}:${d.label || "?"}`).join(", ") || "no audio devices"));
+  } catch (e) { dlog(`${why}: devices unknown (${e.name})`); }
+}
+navigator.mediaDevices?.addEventListener?.("devicechange", () => logDevices("devicechange"));
 $("diag").textContent = diagLines.join("\n");
 $("diagCopyBtn").onclick = async () => {
   const text = `${navigator.userAgent}\n` + diagLines.join("\n");
